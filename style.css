@@ -299,3 +299,26 @@ button:disabled {
 		font-size:16px;
 	}
 }
+/* ストップウォッチ全体 */
+.watch {
+    text-align: center;
+    background: #f8f9ff;
+    border-radius: 12px;
+    padding: 20px;
+}
+
+/* 計測時間の表示 */
+.timer {
+    font-size: clamp(32px, 8vw, 48px);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    margin: 12px 0 18px;
+}
+
+/* ストップウォッチのボタン配置 */
+.actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+}

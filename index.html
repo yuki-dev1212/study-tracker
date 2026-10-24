@@ -37,6 +37,27 @@
 					<div class="stat-note">借金日数 × 1日30分</div>
 				</div>
 			</section>
+			<!-- ストップウォッチ -->
+			<section class="card">
+				<h2>ストップウォッチ</h2>
+				<div class="watch">
+					<div class="muted" id="watchStatus">停止中</div>
+					<div class="timer" id="timerDisplay">00:00:00</div>
+
+					<div class="actions">
+						<button class="primary" id="watchStart">開始</button>
+						<button class="secondary" id="watchPause" disabled>一時停止</button>
+						<button class="secondary" id="watchResume" disabled>再開</button>
+						<button class="primary" id="watchFinish" disabled>終了して記録</button>
+						<button class="danger" id="watchReset" disabled>破棄</button>
+					</div>
+
+					<p class="small-note">
+						終了して記録すると、計測した時間を今日の学習時間に加算します。
+					</p>
+				</div>
+				<div class="message" id="watchMessage"></div>
+			</section>
 			<!-- 学習時間を手入力して記録するエリア -->
 			<section class="card">
 				<h2 class="section-title">学習時間を記録</h2>
@@ -48,6 +69,17 @@
 					<div class="field">
 						<label for="studyMinutes">分（60分以上も入力可）</label>
 						<input autocomplete="off" id="studyMinutes" inputmode="numeric" pattern="[0-9]*" type="text" value="30"/>
+					</div>
+					<div class="field">
+						<label for="studySeconds">秒</label>
+						<input
+							autocomplete="off"
+							id="studySeconds"
+							inputmode="numeric"
+							pattern="[0-9]*"
+							type="text"
+							value="0"
+						/>
 					</div>
 					<button class="primary" id="recordButton">学習を記録</button>
 				</div>
@@ -114,8 +146,9 @@
 	"use strict";
 
 	// 1日あたりの学習目標（分）とブラウザ保存用のキー
-	const DAILY_TARGET = 30;
-	const STORAGE_KEY = "studyTrackerDataV2";
+	const DAILY_TARGET_SECONDS = 30 * 60;
+	// 秒単位で保存するデータのキー
+	const STORAGE_KEY = "studyTrackerSecondsV1";
 	const $ = id => document.getElementById(id);
 
 	// 今日の日付を YYYY-MM-DD 形式で取得する
@@ -142,28 +175,41 @@
 		return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 	}
 
-	// 分数を「時間・分」の文字列に変換する
-	function formatMinutes(n) {
-		n = Math.max(0, Math.floor(n));
-		const h = Math.floor(n / 60);
-		const m = n % 60;
+	// 分数を「時間・分・秒」の文字列に変換する
+	function formatSeconds(seconds) {
+		seconds = Math.max(0, Math.floor(seconds));
 
-		if (h && m) {
-			return `${h}時間${m}分`;
+		const hours = Math.floor(seconds / 3600);
+		const minutes = Math.floor((seconds % 3600) / 60);
+		const remainingSeconds = seconds % 60;
+
+		if (hours > 0) {
+			return `${hours}時間${minutes}分${remainingSeconds}秒`;
+		}
+		if (minutes > 0) {
+			return `${minutes}分${remainingSeconds}秒`;
+		}
+		return `${remainingSeconds}秒`;
 		}
 
-		if (h) {
-			return `${h}時間`;
-		}
+		// ストップウォッチ用に「時:分:秒」の形式で表示する
+		function formatClock(seconds) {
+		seconds = Math.max(0, Math.floor(seconds));
 
-		return `${m}分`;
+		const hours = Math.floor(seconds / 3600);
+		const minutes = Math.floor((seconds % 3600) / 60);
+		const remainingSeconds = seconds % 60;
+
+		return [hours, minutes, remainingSeconds]
+			.map(value => String(value).padStart(2, "0"))
+			.join(":");
 	}
 
 	// 初回起動時に使うデータを作成する
 	function initialData() {
 		return {
 			startDate: localDate(),
-			stockMinutes: 0,
+			stockSeconds: 0,
 			completedDates: [],
 			sessions: {}
 		};
@@ -172,34 +218,30 @@
 	// ブラウザに保存されたデータを読み込む。異常なデータなら初期値を返す
 	function loadData() {
 		try {
-			const s = localStorage.getItem(STORAGE_KEY);
+				const savedData = localStorage.getItem(STORAGE_KEY);
 
-			if (!s) {
+				if (!savedData) {
+					return initialData();
+				}
+
+				const saved = JSON.parse(savedData);
+
+				if (
+					typeof saved.startDate !== "string" ||
+					!Array.isArray(saved.completedDates) ||
+					!saved.sessions ||
+					typeof saved.sessions !== "object" ||
+					!Number.isFinite(saved.stockSeconds) ||
+					saved.stockSeconds < 0
+				) {
+					return initialData();
+				}
+
+				return saved;
+			} catch (error) {
+				console.error("学習データの読み込みに失敗しました。", error);
 				return initialData();
 			}
-
-			const p = JSON.parse(s);
-
-			if (
-				typeof p.startDate !== "string" ||
-				!Array.isArray(p.completedDates) ||
-				!p.sessions ||
-				typeof p.sessions !== "object" ||
-				!Number.isFinite(p.stockMinutes) ||
-				p.stockMinutes < 0
-			) {
-				return initialData();
-			}
-
-			return {
-				startDate: p.startDate,
-				stockMinutes: p.stockMinutes,
-				completedDates: p.completedDates,
-				sessions: p.sessions
-			};
-		} catch {
-			return initialData();
-		}
 	}
 
 	// 保存データと、カレンダーに表示する月を初期化する
@@ -240,35 +282,50 @@
 		input.value = input.value.replace(/[^0-9]/g, "");
 	}
 
-	// 時間・分の入力値を合計分数に変換する
-	function getInputMinutes() {
-		const hs = $("studyHours").value || "0";
-		const ms = $("studyMinutes").value || "0";
-
-		if (hs.length > 9 || ms.length > 9) {
+	// 時間・分・秒を合計秒数に変換する
+	function getInputSeconds() {
+		const hoursText = $("studyHours").value || "0";
+		const minutesText = $("studyMinutes").value || "0";
+		const secondsText = $("studySeconds").value || "0";
+		if (
+			hoursText.length > 8 ||
+			minutesText.length > 8 ||
+			secondsText.length > 8
+		) {
 			return null;
 		}
+		const hours = Number(hoursText);
+		const minutes = Number(minutesText);
+		const seconds = Number(secondsText);
 
-		const total = Number(hs) * 60 + Number(ms);
-		return Number.isSafeInteger(total) && total >= 0 ? total : null;
+		const totalSeconds =
+			hours * 3600 +
+			minutes * 60 +
+			seconds;
+
+		return Number.isSafeInteger(totalSeconds) && totalSeconds >= 0
+			? totalSeconds
+			: null;
 	}
 
 	// 入力中の時間をプレビュー表示し、記録ボタンの状態を更新する
 	function updatePreview() {
-		const total = getInputMinutes();
+		const totalSeconds = getInputSeconds();
 
-		if (total === null) {
+		if (totalSeconds === null) {
 			$("timePreview").textContent = "入力値が大きすぎます。";
 			$("recordButton").disabled = true;
 			return;
 		}
 
-		$("timePreview").textContent = `入力時間：${formatMinutes(total)}（合計 ${total} 分）`;
-		$("recordButton").disabled = total <= 0;
+		$("timePreview").textContent =
+    	`入力時間：${formatSeconds(totalSeconds)}（合計 ${totalSeconds} 秒）`;
+
+		$("recordButton").disabled = totalSeconds <= 0;
 	}
 
-	// 時間・分の入力が変わったら数字を整え、プレビューを更新する
-	["studyHours", "studyMinutes"].forEach(id => {
+	// 時間・分・秒の入力が変わったら数字を整え、プレビューを更新する
+	["studyHours", "studyMinutes", "studySeconds"].forEach(id => {
 		$(id).addEventListener("input", () => {
 			sanitizeNumericInput($(id));
 			updatePreview();
@@ -277,81 +334,115 @@
 
 	// 学習時間を記録し、ノルマ達成・借金解消・ストックを計算する
 	function recordStudy() {
-		const inputMinutes = getInputMinutes();
+		const inputSeconds = getInputSeconds();
 
-		if (inputMinutes === null) {
-			alert("有効な学習時間を入力してください。");
+		if (inputSeconds === null || inputSeconds <= 0) {
+			alert("1秒以上の学習時間を入力してください。");
 			return;
 		}
 
-		if (inputMinutes <= 0) {
-			alert("1分以上の学習時間を入力してください。");
-			return;
-		}
+		const result = recordStudySeconds(inputSeconds, "手入力");
 
+		if (result) {
+		$("message").textContent = result;
+		$("message").style.display = "block";
+		}
+	}
+
+	
+	// 秒数を受け取り、学習記録・達成判定・借金・ストックを更新する
+	function recordStudySeconds(seconds, source) {
 		const today = localDate();
+
+		if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+			alert("1秒以上の学習時間が必要です。");
+			return null;
+		}
 
 		if (data.startDate > today) {
 			alert("起算日が未来の日付です。起算日を確認してください。");
-			return;
+			return null;
 		}
 
-		const missingBefore = getMissingDates(today);
-		const hadDebt = missingBefore.length > 0;
 		const completed = getCompletedSet();
 
-		data.sessions[today] = (Number(data.sessions[today]) || 0) + inputMinutes;
+		// 今日より前の未達成日だけを取得する
+		const pastMissingDates = getMissingDates(addDays(today, -1));
+		const hasPastDebt = pastMissingDates.length > 0;
+		const todayIsIncomplete = !completed.has(today);
+
+		// 実際に勉強した時間だけを今日の記録に加算する
+		data.sessions[today] =
+			(Number(data.sessions[today]) || 0) + seconds;
 
 		let completedCount = 0;
 		let stockAdded = 0;
 
-		if (hadDebt) {
-			let available = inputMinutes + data.stockMinutes;
-			data.stockMinutes = 0;
+		if (hasPastDebt) {
+			// 過去の借金がある場合、ストックと今回の学習時間を合算する
+			let availableSeconds = seconds + data.stockSeconds;
+			data.stockSeconds = 0;
 
-			for (const date of missingBefore) {
-				if (available < DAILY_TARGET) {
+			for (const date of pastMissingDates) {
+				if (availableSeconds < DAILY_TARGET_SECONDS) {
 					break;
 				}
 
 				completed.add(date);
-				available -= DAILY_TARGET;
+				availableSeconds -= DAILY_TARGET_SECONDS;
 				completedCount++;
 			}
 
-			data.stockMinutes = available;
-			stockAdded = available;
-		} else if (!completed.has(today)) {
-			if (inputMinutes >= DAILY_TARGET) {
+			// 過去の借金を解消した後、今日のノルマを判定する
+			if (
+				todayIsIncomplete &&
+				availableSeconds >= DAILY_TARGET_SECONDS
+			) {
 				completed.add(today);
-				completedCount = 1;
-			} else {
-				const neededFromStock = DAILY_TARGET - inputMinutes;
+				availableSeconds -= DAILY_TARGET_SECONDS;
+				completedCount++;
+			}
 
-				if (data.stockMinutes >= neededFromStock) {
-					completed.add(today);
-					completedCount = 1;
-					data.stockMinutes -= neededFromStock;
-				}
+			// 処理後に余った時間をストックとして保存する
+			data.stockSeconds = availableSeconds;
+			stockAdded = availableSeconds;
+
+		} else if (todayIsIncomplete) {
+			// 過去の借金がなければ、今日のノルマだけを判定する
+			const stockUsed = Math.min(
+				data.stockSeconds,
+				DAILY_TARGET_SECONDS
+			);
+
+			if (
+				seconds >= DAILY_TARGET_SECONDS - stockUsed
+			) {
+				completed.add(today);
+				completedCount++;
+				data.stockSeconds -= stockUsed;
 			}
 		}
 
 		data.completedDates = [...completed].sort();
+
 		saveData();
 		render();
 
-		let result = `今日の学習記録：${formatMinutes(inputMinutes)}\n`;
-		result += completedCount
+		let result = `${source}の学習記録：${formatSeconds(seconds)}\n`;
+
+		result += completedCount > 0
 			? `${completedCount}日分のノルマを達成しました。\n`
 			: "今回、新たに達成した日はありません。\n";
-		result += hadDebt
-			? `ストックに追加：${formatMinutes(stockAdded)}\n`
-			: "遅れがなかったため、超過時間はストックしません。\n";
-		result += `現在のストック：${formatMinutes(data.stockMinutes)}`;
 
-		$("message").textContent = result;
-		$("message").style.display = "block";
+		result += hasPastDebt
+			? `処理後のストック：${formatSeconds(stockAdded)}\n`
+			: "過去の借金がなかったため、超過時間はストックしません。\n";
+
+		result += `現在のストック：${formatSeconds(data.stockSeconds)}`;
+
+		return result;
 	}
+
 
 	// 進捗日・ストック時間・借金日数を画面に反映する
 	function renderStats() {
@@ -371,9 +462,9 @@
 		$("progressNote").textContent = latest
 			? "連続して完了している最終日"
 			: "最初の学習日から未達成";
-		$("stockValue").textContent = formatMinutes(data.stockMinutes);
+		$("stockValue").textContent = formatSeconds(data.stockSeconds);
 		$("debtValue").textContent = `${missing.length}日`;
-		$("debtTimeValue").textContent = formatMinutes(missing.length * DAILY_TARGET);
+		$("debtTimeValue").textContent = formatSeconds(missing.length * DAILY_TARGET_SECONDS);
 	}
 
 	// 達成状況と学習時間を月間カレンダーに描画する
@@ -400,7 +491,7 @@
 			const future = key > today;
 			const before = key < data.startDate;
 			const isDone = done.has(key);
-			const minutes = Number(data.sessions[key]) || 0;
+			const seconds = Number(data.sessions[key]) || 0;
 			const cell = document.createElement("div");
 			cell.className = "day";
 
@@ -433,9 +524,9 @@
 			const label = document.createElement("div");
 			label.className = "day-minutes";
 
-			if (minutes > 0) {
-				label.textContent = formatMinutes(minutes);
-				cell.title = `${formatDate(key)}：実学習 ${minutes}分`;
+			if (seconds > 0) {
+				label.textContent = formatSeconds(seconds);
+				cell.title = `${formatDate(key)}：実学習 ${formatSeconds(seconds)}`;
 			} else if (isDone) {
 				label.textContent = "補填達成";
 				cell.title = `${formatDate(key)}：過去の学習時間で達成`;
@@ -454,7 +545,8 @@
 	}
 
 	// 学習を記録ボタンを押したときに記録処理を実行する
-	$("recordButton").addEventListener("click", recordStudy);
+	$("recordButton").addEventListener("click", () => {recordStudy();
+	});
 
 	// 起算日の入力を検証して保存する
 	$("saveStart").addEventListener("click", () => {
@@ -516,7 +608,138 @@
 		updatePreview();
 	});
 
-	// 起動時に入力プレビューと画面を初期表示する
+	// ストップウォッチの状態を管理する
+	let watchState = "idle";
+	let watchStartedAt = null;
+	let watchPausedMilliseconds = 0;
+	let watchTimer = null;
+
+	// 計測開始からの経過時間をミリ秒で取得する
+	function getElapsedMilliseconds() {
+		const runningMilliseconds =
+		watchState === "running" && watchStartedAt !== null
+		? Date.now() - watchStartedAt
+		: 0;
+
+		return watchPausedMilliseconds + runningMilliseconds;
+	}
+
+	// ストップウォッチの表示を更新する
+	function renderWatch() {
+		const seconds = Math.floor(getElapsedMilliseconds() / 1000);
+
+		$("timerDisplay").textContent = formatClock(seconds);
+
+		$("watchStatus").textContent =
+			watchState === "running"
+				? "計測中"
+				: watchState === "paused"
+				? "一時停止中"
+				: "停止中";
+	}
+
+	// 状態に応じてボタンを有効・無効にする
+	function updateWatchButtons() {
+		$("watchStart").disabled = watchState !== "idle";
+		$("watchPause").disabled = watchState !== "running";
+		$("watchResume").disabled = watchState !== "paused";
+		$("watchFinish").disabled = watchState === "idle";
+		$("watchReset").disabled = watchState === "idle";
+	}
+
+	// ストップウォッチを開始する
+	$("watchStart").addEventListener("click", () => {
+		watchState = "running";
+		watchStartedAt = Date.now();
+		watchPausedMilliseconds = 0;
+
+		watchTimer = setInterval(renderWatch, 200);
+
+		updateWatchButtons();
+		renderWatch();
+	});
+
+	// 計測を一時停止する
+	$("watchPause").addEventListener("click", () => {
+		if (watchState !== "running") {
+			return;
+		}
+
+		watchPausedMilliseconds += Date.now() - watchStartedAt;
+		watchStartedAt = null;
+		watchState = "paused";
+
+		updateWatchButtons();
+		renderWatch();
+	});
+
+	// 一時停止した計測を再開する
+	$("watchResume").addEventListener("click", () => {
+		if (watchState !== "paused") {
+		return;
+		}
+
+		watchStartedAt = Date.now();
+		watchState = "running";
+
+		updateWatchButtons();
+		renderWatch();
+	});
+
+	// 計測を破棄する
+	$("watchReset").addEventListener("click", () => {
+		if (!confirm("計測時間を破棄しますか？")) {
+		return;
+		}
+
+		clearInterval(watchTimer);
+		watchTimer = null;
+		watchState = "idle";
+		watchStartedAt = null;
+		watchPausedMilliseconds = 0;
+
+		updateWatchButtons();
+		renderWatch();
+
+		$("watchMessage").style.display = "none";
+	});
+
+	// 計測を終了し、今日の学習時間に加算する
+	$("watchFinish").addEventListener("click", () => {
+		const seconds = Math.floor(getElapsedMilliseconds() / 1000);
+
+		if (seconds < 1) {
+			alert("記録できる時間がありません。");
+			return;
+		}
+
+		clearInterval(watchTimer);
+		watchTimer = null;
+		watchState = "idle";
+		watchStartedAt = null;
+		watchPausedMilliseconds = 0;
+
+		updateWatchButtons();
+		renderWatch();
+
+		const result = recordStudySeconds(seconds, "ストップウォッチ");
+
+		if (result) {
+			$("watchMessage").textContent = result;
+			$("watchMessage").style.display = "block";
+		}
+	});
+
+	// 別タブなどから戻ったときに表示を更新する
+	document.addEventListener("visibilitychange", () => {
+		if (!document.hidden) {
+		renderWatch();
+		}
+	});
+
+	// 起動時にストップウォッチ・入力欄・画面を初期表示する
+	updateWatchButtons();
+	renderWatch();
 	updatePreview();
 	render();
 		</script>
