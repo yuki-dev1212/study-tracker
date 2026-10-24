@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ja">
+	<head>
+		<meta charset="utf-8"/>
+		<meta content="width=device-width, initial-scale=1" name="viewport"/>
+		<title>Study Tracker | 学習時間管理</title>
+		<link rel="stylesheet" href="style.css">
+	</head>
+	<body>
+		<header>
+			<div class="header-inner">
+				<h1>Study Tracker</h1>
+				<p>毎日の30分を積み重ねる、学習時間管理アプリ</p>
+			</div>
+		</header>
+		<main>
+			<!-- 学習の進捗・ストック・借金状況を表示 -->
+			<section class="stats">
+				<div class="card">
+					<div class="stat-label">現在の進捗日</div>
+					<div class="stat-value" id="progressDate">--</div>
+					<div class="stat-note" id="progressNote">起算日を設定してください</div>
+				</div>
+				<div class="card">
+					<div class="stat-label">ストック時間</div>
+					<div class="stat-value" id="stockValue">0分</div>
+					<div class="stat-note">遅れ解消後の余剰時間</div>
+				</div>
+				<div class="card">
+					<div class="stat-label">借金日数</div>
+					<div class="stat-value" id="debtValue">0日</div>
+					<div class="stat-note">今日までの未達成日数</div>
+				</div>
+				<div class="card">
+					<div class="stat-label">借金時間</div>
+					<div class="stat-value" id="debtTimeValue">0分</div>
+					<div class="stat-note">借金日数 × 1日30分</div>
+				</div>
+			</section>
+			<!-- 学習時間を手入力して記録するエリア -->
+			<section class="card">
+				<h2 class="section-title">学習時間を記録</h2>
+				<div class="form-row">
+					<div class="field">
+						<label for="studyHours">時間</label>
+						<input autocomplete="off" id="studyHours" inputmode="numeric" pattern="[0-9]*" type="text" value="0"/>
+					</div>
+					<div class="field">
+						<label for="studyMinutes">分（60分以上も入力可）</label>
+						<input autocomplete="off" id="studyMinutes" inputmode="numeric" pattern="[0-9]*" type="text" value="30"/>
+					</div>
+					<button class="primary" id="recordButton">学習を記録</button>
+				</div>
+				<div class="preview" id="timePreview">入力時間：30分</div>
+				<div class="message" id="message" role="status"></div>
+				<p class="small-note">数字以外は自動で除去します。例：時間「0」、分「80」→「1時間20分」。実際に勉強した時間は今日の記録に加算します。未来の日付は達成扱いになりません。</p>
+			</section>
+			<!-- 日ごとの達成状況と学習時間をカレンダーに表示 -->
+			<section class="card calendar-card">
+				<div class="calendar-top">
+					<h2 id="calendarTitle">カレンダー</h2>
+					<div class="month-controls">
+						<button aria-label="前の月" class="secondary" id="prevMonth">‹</button>
+						<button class="secondary" id="thisMonth">今月</button>
+						<button aria-label="次の月" class="secondary" id="nextMonth">›</button>
+					</div>
+				</div>
+				<div class="weekdays">
+					<div>日</div>
+					<div>月</div>
+					<div>火</div>
+					<div>水</div>
+					<div>木</div>
+					<div>金</div>
+					<div>土</div>
+				</div>
+				<div class="calendar-grid" id="calendarGrid"></div>
+				<div class="legend">
+					<span>
+						<i class="dot dot-done">
+						</i>
+						達成
+					</span>
+					<span>
+						<i class="dot dot-undone">
+						</i>
+						未達成
+					</span>
+					<span>
+						<i class="dot dot-future">
+						</i>
+						未来・対象外
+					</span>
+					<span>枠線：今日</span>
+				</div>
+			</section>
+			<!-- 起算日の変更と学習データのリセット -->
+			<section class="card settings">
+				<h2 class="section-title">学習設定</h2>
+				<div class="settings-row">
+					<div class="field">
+						<label for="startDate">起算日</label>
+						<input id="startDate" type="date"/>
+					</div>
+					<div class="settings-actions">
+						<button class="primary" id="saveStart">起算日を保存</button>
+						<button class="danger" id="resetButton">全データをリセット</button>
+					</div>
+				</div>
+				<p class="small-note">記録はこのブラウザ内に保存されます。別のPC・スマホには自動同期されません。ブラウザのデータ削除や別端末では記録が引き継がれないため注意してください。</p>
+			</section>
+		</main>
+		<script>
+	"use strict";
+
+	// 1日あたりの学習目標（分）とブラウザ保存用のキー
+	const DAILY_TARGET = 30;
+	const STORAGE_KEY = "studyTrackerDataV2";
+	const $ = id => document.getElementById(id);
+
+	// 今日の日付を YYYY-MM-DD 形式で取得する
+	function localDate(date = new Date()) {
+		return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+	}
+
+	// 日付文字列を Date オブジェクトに変換する
+	function dateFromKey(key) {
+		const [y, m, d] = key.split("-").map(Number);
+		return new Date(y, m - 1, d);
+	}
+
+	// 指定した日付に日数を加算する
+	function addDays(key, amount) {
+		const d = dateFromKey(key);
+		d.setDate(d.getDate() + amount);
+		return localDate(d);
+	}
+
+	// 日付を画面表示用の形式に整える
+	function formatDate(key) {
+		const d = dateFromKey(key);
+		return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+	}
+
+	// 分数を「時間・分」の文字列に変換する
+	function formatMinutes(n) {
+		n = Math.max(0, Math.floor(n));
+		const h = Math.floor(n / 60);
+		const m = n % 60;
+
+		if (h && m) {
+			return `${h}時間${m}分`;
+		}
+
+		if (h) {
+			return `${h}時間`;
+		}
+
+		return `${m}分`;
+	}
+
+	// 初回起動時に使うデータを作成する
+	function initialData() {
+		return {
+			startDate: localDate(),
+			stockMinutes: 0,
+			completedDates: [],
+			sessions: {}
+		};
+	}
+
+	// ブラウザに保存されたデータを読み込む。異常なデータなら初期値を返す
+	function loadData() {
+		try {
+			const s = localStorage.getItem(STORAGE_KEY);
+
+			if (!s) {
+				return initialData();
+			}
+
+			const p = JSON.parse(s);
+
+			if (
+				typeof p.startDate !== "string" ||
+				!Array.isArray(p.completedDates) ||
+				!p.sessions ||
+				typeof p.sessions !== "object" ||
+				!Number.isFinite(p.stockMinutes) ||
+				p.stockMinutes < 0
+			) {
+				return initialData();
+			}
+
+			return {
+				startDate: p.startDate,
+				stockMinutes: p.stockMinutes,
+				completedDates: p.completedDates,
+				sessions: p.sessions
+			};
+		} catch {
+			return initialData();
+		}
+	}
+
+	// 保存データと、カレンダーに表示する月を初期化する
+	let data = loadData();
+	let visibleMonth = new Date();
+	visibleMonth.setDate(1);
+
+	// 現在の学習データをブラウザに保存する
+	function saveData() {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+	}
+
+	// 達成済み日付の配列を Set に変換して検索しやすくする
+	function getCompletedSet() {
+		return new Set(data.completedDates);
+	}
+
+	// 起算日から今日までの未達成日を一覧にする
+	function getMissingDates(today) {
+		const done = getCompletedSet();
+		const missing = [];
+
+		if (data.startDate > today) {
+			return missing;
+		}
+
+		for (let d = data.startDate; d <= today; d = addDays(d, 1)) {
+			if (!done.has(d)) {
+				missing.push(d);
+			}
+		}
+
+		return missing;
+	}
+
+	// 入力欄から数字以外の文字を取り除く
+	function sanitizeNumericInput(input) {
+		input.value = input.value.replace(/[^0-9]/g, "");
+	}
+
+	// 時間・分の入力値を合計分数に変換する
+	function getInputMinutes() {
+		const hs = $("studyHours").value || "0";
+		const ms = $("studyMinutes").value || "0";
+
+		if (hs.length > 9 || ms.length > 9) {
+			return null;
+		}
+
+		const total = Number(hs) * 60 + Number(ms);
+		return Number.isSafeInteger(total) && total >= 0 ? total : null;
+	}
+
+	// 入力中の時間をプレビュー表示し、記録ボタンの状態を更新する
+	function updatePreview() {
+		const total = getInputMinutes();
+
+		if (total === null) {
+			$("timePreview").textContent = "入力値が大きすぎます。";
+			$("recordButton").disabled = true;
+			return;
+		}
+
+		$("timePreview").textContent = `入力時間：${formatMinutes(total)}（合計 ${total} 分）`;
+		$("recordButton").disabled = total <= 0;
+	}
+
+	// 時間・分の入力が変わったら数字を整え、プレビューを更新する
+	["studyHours", "studyMinutes"].forEach(id => {
+		$(id).addEventListener("input", () => {
+			sanitizeNumericInput($(id));
+			updatePreview();
+		});
+	});
+
+	// 学習時間を記録し、ノルマ達成・借金解消・ストックを計算する
+	function recordStudy() {
+		const inputMinutes = getInputMinutes();
+
+		if (inputMinutes === null) {
+			alert("有効な学習時間を入力してください。");
+			return;
+		}
+
+		if (inputMinutes <= 0) {
+			alert("1分以上の学習時間を入力してください。");
+			return;
+		}
+
+		const today = localDate();
+
+		if (data.startDate > today) {
+			alert("起算日が未来の日付です。起算日を確認してください。");
+			return;
+		}
+
+		const missingBefore = getMissingDates(today);
+		const hadDebt = missingBefore.length > 0;
+		const completed = getCompletedSet();
+
+		data.sessions[today] = (Number(data.sessions[today]) || 0) + inputMinutes;
+
+		let completedCount = 0;
+		let stockAdded = 0;
+
+		if (hadDebt) {
+			let available = inputMinutes + data.stockMinutes;
+			data.stockMinutes = 0;
+
+			for (const date of missingBefore) {
+				if (available < DAILY_TARGET) {
+					break;
+				}
+
+				completed.add(date);
+				available -= DAILY_TARGET;
+				completedCount++;
+			}
+
+			data.stockMinutes = available;
+			stockAdded = available;
+		} else if (!completed.has(today)) {
+			if (inputMinutes >= DAILY_TARGET) {
+				completed.add(today);
+				completedCount = 1;
+			} else {
+				const neededFromStock = DAILY_TARGET - inputMinutes;
+
+				if (data.stockMinutes >= neededFromStock) {
+					completed.add(today);
+					completedCount = 1;
+					data.stockMinutes -= neededFromStock;
+				}
+			}
+		}
+
+		data.completedDates = [...completed].sort();
+		saveData();
+		render();
+
+		let result = `今日の学習記録：${formatMinutes(inputMinutes)}\n`;
+		result += completedCount
+			? `${completedCount}日分のノルマを達成しました。\n`
+			: "今回、新たに達成した日はありません。\n";
+		result += hadDebt
+			? `ストックに追加：${formatMinutes(stockAdded)}\n`
+			: "遅れがなかったため、超過時間はストックしません。\n";
+		result += `現在のストック：${formatMinutes(data.stockMinutes)}`;
+
+		$("message").textContent = result;
+		$("message").style.display = "block";
+	}
+
+	// 進捗日・ストック時間・借金日数を画面に反映する
+	function renderStats() {
+		const today = localDate();
+		const done = getCompletedSet();
+		const missing = getMissingDates(today);
+		let latest = null;
+
+		for (let d = data.startDate; d <= today; d = addDays(d, 1)) {
+			if (!done.has(d)) {
+				break;
+			}
+			latest = d;
+		}
+
+		$("progressDate").textContent = latest ? formatDate(latest) : "未達成";
+		$("progressNote").textContent = latest
+			? "連続して完了している最終日"
+			: "最初の学習日から未達成";
+		$("stockValue").textContent = formatMinutes(data.stockMinutes);
+		$("debtValue").textContent = `${missing.length}日`;
+		$("debtTimeValue").textContent = formatMinutes(missing.length * DAILY_TARGET);
+	}
+
+	// 達成状況と学習時間を月間カレンダーに描画する
+	function renderCalendar() {
+		const y = visibleMonth.getFullYear();
+		const m = visibleMonth.getMonth();
+		$("calendarTitle").textContent = `${y}年${m + 1}月`;
+
+		const offset = new Date(y, m, 1).getDay();
+		const last = new Date(y, m + 1, 0).getDate();
+		const today = localDate();
+		const done = getCompletedSet();
+		const grid = $("calendarGrid");
+		grid.innerHTML = "";
+
+		for (let i = 0; i < offset; i++) {
+			const e = document.createElement("div");
+			e.className = "day empty";
+			grid.appendChild(e);
+		}
+
+		for (let day = 1; day <= last; day++) {
+			const key = localDate(new Date(y, m, day));
+			const future = key > today;
+			const before = key < data.startDate;
+			const isDone = done.has(key);
+			const minutes = Number(data.sessions[key]) || 0;
+			const cell = document.createElement("div");
+			cell.className = "day";
+
+			if (future || before) {
+				cell.classList.add("future");
+			}
+			if (isDone) {
+				cell.classList.add("done");
+			}
+			if (key === today) {
+				cell.classList.add("today");
+			}
+
+			const num = document.createElement("div");
+			num.className = "day-number";
+			num.textContent = day;
+			cell.appendChild(num);
+
+			const status = document.createElement("div");
+			status.className = "day-status";
+			status.textContent = before
+				? "対象外"
+				: future
+					? "未来"
+					: isDone
+						? "達成 ✓"
+						: "未達成";
+			cell.appendChild(status);
+
+			const label = document.createElement("div");
+			label.className = "day-minutes";
+
+			if (minutes > 0) {
+				label.textContent = formatMinutes(minutes);
+				cell.title = `${formatDate(key)}：実学習 ${minutes}分`;
+			} else if (isDone) {
+				label.textContent = "補填達成";
+				cell.title = `${formatDate(key)}：過去の学習時間で達成`;
+			}
+
+			cell.appendChild(label);
+			grid.appendChild(cell);
+		}
+	}
+
+	// 画面全体の表示を最新データに更新する
+	function render() {
+		$("startDate").value = data.startDate;
+		renderStats();
+		renderCalendar();
+	}
+
+	// 学習を記録ボタンを押したときに記録処理を実行する
+	$("recordButton").addEventListener("click", recordStudy);
+
+	// 起算日の入力を検証して保存する
+	$("saveStart").addEventListener("click", () => {
+		const value = $("startDate").value;
+		const today = localDate();
+
+		if (!value) {
+			alert("起算日を選択してください。");
+			return;
+		}
+
+		if (value > today) {
+			alert("起算日は今日以前の日付を選択してください。");
+			return;
+		}
+
+		if (value !== data.startDate) {
+			if (!confirm("起算日を変更しますか？\n既存の学習記録とストックは維持されます。")) {
+				$("startDate").value = data.startDate;
+				return;
+			}
+			data.startDate = value;
+		}
+
+		saveData();
+		render();
+		alert("起算日を保存しました。");
+	});
+
+	// カレンダーを前月に切り替える
+	$("prevMonth").addEventListener("click", () => {
+		visibleMonth.setMonth(visibleMonth.getMonth() - 1);
+		renderCalendar();
+	});
+
+	// カレンダーを翌月に切り替える
+	$("nextMonth").addEventListener("click", () => {
+		visibleMonth.setMonth(visibleMonth.getMonth() + 1);
+		renderCalendar();
+	});
+
+	// カレンダーを今月に戻す
+	$("thisMonth").addEventListener("click", () => {
+		visibleMonth = new Date();
+		visibleMonth.setDate(1);
+		renderCalendar();
+	});
+
+	// 確認後、学習記録・達成状況・ストックを初期化する
+	$("resetButton").addEventListener("click", () => {
+		if (!confirm("学習記録・達成状況・ストックをすべて削除します。\nこの操作は取り消せません。よろしいですか？")) {
+			return;
+		}
+
+		data = initialData();
+		saveData();
+		$("message").style.display = "none";
+		render();
+		updatePreview();
+	});
+
+	// 起動時に入力プレビューと画面を初期表示する
+	updatePreview();
+	render();
+		</script>
+	</body>
+</html>
