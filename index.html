@@ -609,10 +609,66 @@
 	});
 
 	// ストップウォッチの状態を管理する
+	const WATCH_STORAGE_KEY = "studyTrackerWatchV1";
 	let watchState = "idle";
 	let watchStartedAt = null;
 	let watchPausedMilliseconds = 0;
 	let watchTimer = null;
+
+	// ストップウォッチの状態を保存する
+	function saveWatchState() {
+		try {
+			localStorage.setItem(
+				WATCH_STORAGE_KEY,
+				JSON.stringify({
+					state: watchState,
+					elapsedMilliseconds: getElapsedMilliseconds()
+				})
+			);
+		} catch (error) {
+			console.error("ストップウォッチの保存に失敗しました。", error);
+		}
+	}
+
+	// 保存されたストップウォッチの状態を復元する
+	function restoreWatchState() {
+		try {
+			const savedText = localStorage.getItem(WATCH_STORAGE_KEY);
+
+			if (!savedText) {
+				return false;
+			}
+
+			const saved = JSON.parse(savedText);
+
+			if (
+				!["running", "paused"].includes(saved.state) ||
+				!Number.isFinite(saved.elapsedMilliseconds) ||
+				saved.elapsedMilliseconds < 0
+			) {
+				clearSavedWatchState();
+				return false;
+			}
+
+			watchPausedMilliseconds = saved.elapsedMilliseconds;
+			watchStartedAt = null;
+			watchState = "paused";
+
+			return true;
+		} catch (error) {
+			console.error("ストップウォッチの復元に失敗しました。", error);
+			return false;
+		}
+	}
+
+	// 保存されたストップウォッチの状態を削除する
+	function clearSavedWatchState() {
+		try {
+			localStorage.removeItem(WATCH_STORAGE_KEY);
+			} catch (error) {
+    		console.error("ストップウォッチの保存データ削除に失敗しました。", error);
+			}
+	}
 
 	// 計測開始からの経過時間をミリ秒で取得する
 	function getElapsedMilliseconds() {
@@ -653,7 +709,12 @@
 		watchStartedAt = Date.now();
 		watchPausedMilliseconds = 0;
 
-		watchTimer = setInterval(renderWatch, 200);
+		saveWatchState();
+
+		watchTimer = setInterval(() => {
+		renderWatch();
+		saveWatchState();
+		}, 1000);
 
 		updateWatchButtons();
 		renderWatch();
@@ -669,6 +730,8 @@
 		watchStartedAt = null;
 		watchState = "paused";
 
+		saveWatchState();
+
 		updateWatchButtons();
 		renderWatch();
 	});
@@ -681,6 +744,13 @@
 
 		watchStartedAt = Date.now();
 		watchState = "running";
+
+		saveWatchState();
+
+		watchTimer = setInterval(() => {
+		renderWatch();
+		saveWatchState();
+		}, 1000);
 
 		updateWatchButtons();
 		renderWatch();
@@ -697,6 +767,8 @@
 		watchState = "idle";
 		watchStartedAt = null;
 		watchPausedMilliseconds = 0;
+
+		clearSavedWatchState();
 
 		updateWatchButtons();
 		renderWatch();
@@ -719,6 +791,8 @@
 		watchStartedAt = null;
 		watchPausedMilliseconds = 0;
 
+		clearSavedWatchState();
+
 		updateWatchButtons();
 		renderWatch();
 
@@ -738,6 +812,7 @@
 	});
 
 	// 起動時にストップウォッチ・入力欄・画面を初期表示する
+	restoreWatchState();
 	updateWatchButtons();
 	renderWatch();
 	updatePreview();
