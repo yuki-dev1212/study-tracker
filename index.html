@@ -24,17 +24,17 @@
 				<div class="card">
 					<div class="stat-label">ストック時間</div>
 					<div class="stat-value" id="stockValue">0分</div>
-					<div class="stat-note">遅れ解消後の余剰時間</div>
+					<div class="stat-note">余剰学習時間</div>
 				</div>
 				<div class="card">
-					<div class="stat-label">借金日数</div>
+					<div class="stat-label">未達成日数</div>
 					<div class="stat-value" id="debtValue">0日</div>
-					<div class="stat-note">今日までの未達成日数</div>
+					<div class="stat-note" id="debtNote">（--/--）までの未達成日数</div>
 				</div>
 				<div class="card">
-					<div class="stat-label">借金時間</div>
+					<div class="stat-label">不足時間</div>
 					<div class="stat-value" id="debtTimeValue">0分</div>
-					<div class="stat-note">借金日数 × 1日30分</div>
+					<div class="stat-note">ストックを差し引いた不足時間</div>
 				</div>
 			</section>
 			<!-- ストップウォッチ -->
@@ -436,11 +436,7 @@
 
 		result += completedCount > 0
 			? `${completedCount}日分のノルマを達成しました。\n`
-			: "今回、新たに達成した日はありません。\n";
-
-		result += hasPastDebt || todayIsIncomplete
-			? `処理後のストック：${formatSeconds(stockAdded)}\n`
-			: "超過時間はストックしません。\n";
+			: "今回の達成：なし\n";
 
 		result += `現在のストック：${formatSeconds(data.stockSeconds)}`;
 
@@ -468,11 +464,14 @@
 		};
 		const nextTarget = latest ? addDays(latest, 1) : data.startDate;
 
-		$("progressDate").textContent = latest ? `${formatMonthDay(latest)}まで達成` : "まだ達成していません";
+		$("progressDate").textContent = latest ? `${formatMonthDay(latest)}まで達成` : "未達成";
 		$("progressNote").textContent = latest ? `${formatMonthDay(latest)}まで：完了\n次の達成目標：${formatMonthDay(nextTarget)}` : `次の達成目標：${formatMonthDay(nextTarget)}`;
 		$("stockValue").textContent = formatSeconds(data.stockSeconds);
 		$("debtValue").textContent = `${missing.length}日`;
-		$("debtTimeValue").textContent = formatSeconds(missing.length * DAILY_TARGET_SECONDS);
+		$("debtNote").textContent = `${formatDate(today)}までの未達成日数`;
+		const debtSeconds = missing.length * DAILY_TARGET_SECONDS;
+		const remainingDebtSeconds = Math.max(0, debtSeconds - data.stockSeconds);
+		$("debtTimeValue").textContent = formatSeconds(remainingDebtSeconds);
 	}
 
 	// 達成状況と学習時間を月間カレンダーに描画する
