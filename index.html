@@ -277,9 +277,9 @@
 		return missing;
 	}
 
-	// 入力欄から数字以外の文字を取り除く
+	// 入力欄の全角数字を半角に変換し、数字以外の文字を取り除く
 	function sanitizeNumericInput(input) {
-		input.value = input.value.replace(/[^0-9]/g, "");
+		input.value = input.value.normalize("NFKC").replace(/[^0-9]/g, "");
 	}
 
 	// 時間・分・秒を合計秒数に変換する
@@ -323,6 +323,13 @@
 
 		$("recordButton").disabled = totalSeconds <= 0;
 	}
+
+	// 時間・分・秒の入力欄を選択したら、現在の数字を全選択する
+	["studyHours", "studyMinutes", "studySeconds"].forEach(id => {
+		$(id).addEventListener("focus", event => {
+			event.target.select();
+		});
+	});
 
 	// 時間・分・秒の入力が変わったら数字を整え、プレビューを更新する
 	["studyHours", "studyMinutes", "studySeconds"].forEach(id => {
