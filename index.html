@@ -403,23 +403,27 @@
 				completedCount++;
 			}
 
-			// 処理後に余った時間をストックとして保存する
-			data.stockSeconds = availableSeconds;
-			stockAdded = availableSeconds;
+			// 過去の借金が残っている場合だけ、余り時間をストックする
+			const remainingPastDebt = pastMissingDates.some(
+				date => !completed.has(date)
+			);
+			data.stockSeconds = remainingPastDebt ? availableSeconds: 0;
+			stockAdded = data.stockSeconds;
 
 		} else if (todayIsIncomplete) {
-			// 過去の借金がなければ、今日のノルマだけを判定する
-			const stockUsed = Math.min(
-				data.stockSeconds,
-				DAILY_TARGET_SECONDS
-			);
+			// 今日だけ未達成の場合、今回の学習時間とストックを合算する
+			const availableSeconds = seconds + data.stockSeconds;
 
 			if (
-				seconds >= DAILY_TARGET_SECONDS - stockUsed
+				availableSeconds >= DAILY_TARGET_SECONDS
 			) {
 				completed.add(today);
 				completedCount++;
-				data.stockSeconds -= stockUsed;
+				data.stockSeconds = 0;
+			} else{
+				// 今日のノルマに届かなければ、時間をストックする
+				data.stockSeconds = availableSeconds;
+				stockAdded = availableSeconds;
 			}
 		}
 
@@ -434,9 +438,9 @@
 			? `${completedCount}日分のノルマを達成しました。\n`
 			: "今回、新たに達成した日はありません。\n";
 
-		result += hasPastDebt
+		result += hasPastDebt || todayIsIncomplete
 			? `処理後のストック：${formatSeconds(stockAdded)}\n`
-			: "過去の借金がなかったため、超過時間はストックしません。\n";
+			: "超過時間はストックしません。\n";
 
 		result += `現在のストック：${formatSeconds(data.stockSeconds)}`;
 
