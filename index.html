@@ -17,7 +17,7 @@
 			<!-- 学習の進捗・ストック・借金状況を表示 -->
 			<section class="stats">
 				<div class="card">
-					<div class="stat-label">現在の進捗日</div>
+					<div class="stat-label">現在の進捗</div>
 					<div class="stat-value" id="progressDate">--</div>
 					<div class="stat-note" id="progressNote">起算日を設定してください</div>
 				</div>
@@ -458,10 +458,14 @@
 			latest = d;
 		}
 
-		$("progressDate").textContent = latest ? formatDate(latest) : "未達成";
-		$("progressNote").textContent = latest
-			? "連続して完了している最終日"
-			: "最初の学習日から未達成";
+		const formatMonthDay = (date) => {
+			const [, month, day] = date.split("-").map(Number);
+			return `${month}月${day}日`;
+		};
+		const nextTarget = latest ? addDays(latest, 1) : data.startDate;
+
+		$("progressDate").textContent = latest ? `${formatMonthDay(latest)}まで達成` : "まだ達成していません";
+		$("progressNote").textContent = latest ? `${formatMonthDay(latest)}まで：完了\n次の達成目標：${formatMonthDay(nextTarget)}` : `次の達成目標：${formatMonthDay(nextTarget)}`;
 		$("stockValue").textContent = formatSeconds(data.stockSeconds);
 		$("debtValue").textContent = `${missing.length}日`;
 		$("debtTimeValue").textContent = formatSeconds(missing.length * DAILY_TARGET_SECONDS);

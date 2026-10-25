@@ -64,6 +64,7 @@ main {
 	color:var(--muted);
 	font-size:12px;
 	margin-top:5px;
+	white-space: pre-line;
 }
 .section-title {
 	font-size:17px;
