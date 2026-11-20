@@ -323,3 +323,25 @@ button:disabled {
     justify-content: center;
     flex-wrap: wrap;
 }
+
+/* 学習時間編集画面 */
+#editSection {
+    margin-top: 18px;
+}
+
+#editSection[hidden] {
+    display: none;
+}
+
+#editSection .actions {
+    margin-top: 16px;
+}
+
+#editSection .actions button {
+    flex: 1;
+    min-width: 100px;
+}
+
+#editTitle {
+    margin-bottom: 16px;
+}

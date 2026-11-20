@@ -87,6 +87,11 @@
 				<div class="message" id="message" role="status"></div>
 				<p class="small-note">数字以外は自動で除去します。例：時間「0」、分「80」→「1時間20分」。実際に勉強した時間は今日の記録に加算します。未来の日付は達成扱いになりません。</p>
 			</section>
+
+			<p class="small-note">
+    		日付をクリックすると、その日の学習時間を追加・修正・削除できます。
+			</p>
+
 			<!-- 日ごとの達成状況と学習時間をカレンダーに表示 -->
 			<section class="card calendar-card">
 				<div class="calendar-top">
@@ -121,11 +126,57 @@
 					<span>
 						<i class="dot dot-future">
 						</i>
-						未来・対象外
+						対象外
 					</span>
 					<span>枠線：今日</span>
 				</div>
 			</section>
+
+			<!-- カレンダーの日付を編集する画面 -->
+            <section class="card" id="editSection" hidden>
+                <h2 class="section-title" id="editTitle">
+                    学習時間の編集
+                </h2>
+
+                <div class="form-row">
+                    <div class="field">
+                        <label for="editHours">時間</label>
+                        <input id="editHours" type="text"
+                            inputmode="numeric" value="0">
+                    </div>
+
+                    <div class="field">
+                        <label for="editMinutes">分</label>
+                        <input id="editMinutes" type="text"
+                            inputmode="numeric" value="0">
+                    </div>
+
+                    <div class="field">
+                        <label for="editSeconds">秒</label>
+                        <input id="editSeconds" type="text"
+                            inputmode="numeric" value="0">
+                    </div>
+                </div>
+
+                <div class="preview" id="editPreview">
+                    入力時間：0秒
+                </div>
+
+                <div class="actions">
+                    <button class="primary" id="editSave">
+                        保存
+                    </button>
+                    <button class="danger" id="editDelete">
+                        削除
+                    </button>
+                    <button class="secondary" id="editCancel">
+                        閉じる
+                    </button>
+                </div>
+
+                <div class="message" id="editMessage"></div>
+            </section>
+
 			<!-- 起算日の変更と学習データのリセット -->
 			<section class="card settings">
 				<h2 class="section-title">学習設定</h2>
@@ -248,6 +299,8 @@
 	let data = loadData();
 	let visibleMonth = new Date();
 	visibleMonth.setDate(1);
+	// 現在編集している日付
+	let editingDate = null;
 
 	// 現在の学習データをブラウザに保存する
 	function saveData() {
@@ -356,10 +409,81 @@
 		}
 	}
 
+	// 学習記録をもとに達成状況とストックを再計算する
+	function recalculateStudyStatus() {
+		const today = localDate();
+		const completed = new Set();
+		let stockSeconds = 0;
+
+		// 起算日から今日までを順番に確認する
+		for (
+			let date = data.startDate;
+			date <= today;
+			date = addDays(date, 1)
+		) {
+			const seconds = Number(data.sessions[date]) || 0;
+
+			// その日に学習記録がなければ次の日へ進む
+			if (seconds <= 0) {
+				continue;
+			}
+
+			// 今回使える時間は学習時間とストックの合計
+			let availableSeconds = seconds + stockSeconds;
+
+			// ストックを一度リセットする
+			stockSeconds = 0;
+
+			// 過去の未達成日を取得する
+			const pastMissingDates = [];
+
+			for (
+				let pastDate = data.startDate;
+				pastDate < date;
+				pastDate = addDays(pastDate, 1)
+			) {
+				if (!completed.has(pastDate)) {
+					pastMissingDates.push(pastDate);
+				}
+			}
+
+			// 過去の未達成日から順番にノルマを補填する
+			for (const pastDate of pastMissingDates) {
+				if (availableSeconds < DAILY_TARGET_SECONDS) {
+					break;
+				}
+
+				completed.add(pastDate);
+				availableSeconds -= DAILY_TARGET_SECONDS;
+			}
+
+			// 当日のノルマを判定する
+			if (availableSeconds >= DAILY_TARGET_SECONDS) {
+				completed.add(date);
+				availableSeconds -= DAILY_TARGET_SECONDS;
+			}
+
+			// 過去の未達成日が残っているか確認する
+			const remainingPastDebt = pastMissingDates.some(
+				pastDate => !completed.has(pastDate)
+			);
+
+			// 既存の計算ルールに合わせてストックを更新する
+			if (remainingPastDebt) {
+				stockSeconds = availableSeconds;
+			} else if (pastMissingDates.length === 0) {
+				stockSeconds = availableSeconds;
+			}
+		}
+
+		data.completedDates = [...completed].sort();
+		data.stockSeconds = stockSeconds;
+	}
+
 	
 	// 秒数を受け取り、学習記録・達成判定・借金・ストックを更新する
-	function recordStudySeconds(seconds, source) {
-		const today = localDate();
+	function recordStudySeconds(seconds, source, targetDate) {
+		const today = targetDate || localDate();
 
 		if (!Number.isSafeInteger(seconds) || seconds <= 0) {
 			alert("1秒以上の学習時間が必要です。");
@@ -481,6 +605,169 @@
 		$("debtTimeValue").textContent = formatSeconds(remainingDebtSeconds);
 	}
 
+	// カレンダーの日付をクリックしたときに編集画面を表示する
+	function openEditSection(date) {
+		const today = localDate();
+
+		// 未来の日付と起算日前の日付は編集できない
+		if (date > today || date < data.startDate) {
+			return;
+		}
+
+		editingDate = date;
+
+		const seconds = Number(data.sessions[date]) || 0;
+
+		const hours = Math.floor(seconds / 3600);
+		const minutes = Math.floor((seconds % 3600) / 60);
+		const remainingSeconds = seconds % 60;
+
+		$("editTitle").textContent =
+			`${formatDate(date)} の学習時間`;
+
+		$("editHours").value = hours;
+		$("editMinutes").value = minutes;
+		$("editSeconds").value = remainingSeconds;
+
+		// 記録がない日には削除ボタンを表示しない
+		$("editDelete").disabled = seconds <= 0;
+
+		$("editMessage").style.display = "none";
+
+		$("editSection").hidden = false;
+
+		$("editSection").scrollIntoView({
+			behavior: "smooth",
+			block: "center"
+		});
+
+		updateEditPreview();
+	}
+
+	// 編集欄の入力値を秒数に変換する
+	function getEditInputSeconds() {
+		const values = [
+			$("editHours").value || "0",
+			$("editMinutes").value || "0",
+			$("editSeconds").value || "0"
+		];
+
+		if (values.some(value => value.length > 8)) {
+			return null;
+		}
+
+		const [hours, minutes, seconds] = values.map(Number);
+
+		const totalSeconds =
+			hours * 3600 +
+			minutes * 60 +
+			seconds;
+
+		return Number.isSafeInteger(totalSeconds)
+			? totalSeconds
+			: null;
+	}
+
+	// 編集画面の入力時間を表示する
+	function updateEditPreview() {
+		const seconds = getEditInputSeconds();
+
+		if (seconds === null) {
+			$("editPreview").textContent = "入力値が大きすぎます。";
+			$("editSave").disabled = true;
+			return;
+		}
+
+		$("editPreview").textContent =
+			`入力時間：${formatSeconds(seconds)}`;
+
+		$("editSave").disabled = false;
+	}
+
+	// 学習時間を保存する
+	function saveEditedStudy() {
+		if (!editingDate) {
+			return;
+		}
+
+		const seconds = getEditInputSeconds();
+
+		if (seconds === null) {
+			alert("正しい学習時間を入力してください。");
+			return;
+		}
+
+		// 0秒の場合は記録を削除する
+		if (seconds === 0) {
+			delete data.sessions[editingDate];
+		} else {
+			// 指定日の学習時間を置き換える
+			data.sessions[editingDate] = seconds;
+		}
+
+		// 達成状況とストックを再計算する
+		recalculateStudyStatus();
+
+		saveData();
+		render();
+
+		// 保存後の入力欄も最新の記録に合わせる
+		$("editHours").value = Math.floor(seconds / 3600);
+		$("editMinutes").value = Math.floor((seconds % 3600) / 60);
+		$("editSeconds").value = seconds % 60;
+
+		$("editDelete").disabled = seconds === 0;
+
+		$("editMessage").textContent =
+			seconds === 0
+				? "学習記録を削除しました。"
+				: "学習時間を保存しました。";
+
+		$("editMessage").style.display = "block";
+
+		updateEditPreview();
+	}
+
+	// 学習時間を削除する
+	function deleteEditedStudy() {
+		if (!editingDate) {
+			return;
+		}
+
+		if (!data.sessions[editingDate]) {
+			alert("削除できる学習記録がありません。");
+			return;
+		}
+
+		if (!confirm(
+			`${formatDate(editingDate)}の学習記録を削除しますか？`
+		)) {
+			return;
+		}
+
+		// 指定日の学習記録を削除する
+		delete data.sessions[editingDate];
+
+		// 達成状況・ストック・未達成日数を再計算する
+		recalculateStudyStatus();
+
+		// ブラウザに保存して画面を更新する
+		saveData();
+		render();
+
+		// 削除後の入力欄を初期化する
+		$("editHours").value = 0;
+		$("editMinutes").value = 0;
+		$("editSeconds").value = 0;
+
+		$("editDelete").disabled = true;
+
+		$("editMessage").textContent = "学習記録を削除しました。";
+		$("editMessage").style.display = "block";
+
+		updateEditPreview();
+	}
+
 	// 達成状況と学習時間を月間カレンダーに描画する
 	function renderCalendar() {
 		const y = visibleMonth.getFullYear();
@@ -526,10 +813,8 @@
 
 			const status = document.createElement("div");
 			status.className = "day-status";
-			status.textContent = before
+			status.textContent = (future || before)
 				? "対象外"
-				: future
-					? "未来"
 					: isDone
 						? "達成 ✓"
 						: "未達成";
@@ -547,6 +832,16 @@
 			}
 
 			cell.appendChild(label);
+
+			// 対象外の日付以外はクリックで編集できるようにする
+			if (!future && !before) {
+				cell.style.cursor = "pointer";
+
+				cell.addEventListener("click", () => {
+					openEditSection(key);
+				});
+			}
+
 			grid.appendChild(cell);
 		}
 	}
@@ -557,6 +852,34 @@
 		renderStats();
 		renderCalendar();
 	}
+	
+	// 編集画面の入力欄を監視する
+	["editHours", "editMinutes", "editSeconds"].forEach(id => {
+		$(id).addEventListener("focus", event => {
+			event.target.select();
+		});
+
+		$(id).addEventListener("input", () => {
+			sanitizeNumericInput($(id));
+			updateEditPreview();
+		});
+	});
+
+	// 編集内容を保存する
+	$("editSave").addEventListener("click", () => {
+		saveEditedStudy();
+	});
+
+	// 学習記録を削除する
+	$("editDelete").addEventListener("click", () => {
+		deleteEditedStudy();
+	});
+
+	// 編集画面を閉じる
+	$("editCancel").addEventListener("click", () => {
+		$("editSection").hidden = true;
+		editingDate = null;
+	});
 
 	// 学習を記録ボタンを押したときに記録処理を実行する
 	$("recordButton").addEventListener("click", () => {recordStudy();
