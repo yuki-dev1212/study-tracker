@@ -113,69 +113,86 @@
 				</div>
 				<div class="calendar-grid" id="calendarGrid"></div>
 				<div class="legend">
-					<span>
-						<i class="dot dot-done">
-						</i>
-						達成
-					</span>
-					<span>
-						<i class="dot dot-undone">
-						</i>
-						未達成
-					</span>
-					<span>
-						<i class="dot dot-future">
-						</i>
-						対象外
-					</span>
+					<span><i class="dot dot-done"></i>達成</span>
+					<span><i class="dot dot-undone"></i>未達成</span>
+					<span><i class="dot dot-future"></i>対象外</span>
 					<span>枠線：今日</span>
 				</div>
 			</section>
 
-			<!-- カレンダーの日付を編集する画面 -->
-            <section class="card" id="editSection" hidden>
-                <h2 class="section-title" id="editTitle">
-                    学習時間の編集
-                </h2>
+			<!-- カレンダーの日付ごとの個別記録を編集する画面 -->
+			<section class="card" id="editSection" hidden>
+				<h2 class="section-title" id="editTitle">
+					学習記録の管理
+				</h2>
 
-                <div class="form-row">
-                    <div class="field">
-                        <label for="editHours">時間</label>
-                        <input id="editHours" type="text"
-                            inputmode="numeric" value="0">
-                    </div>
+				<!-- その日の合計時間 -->
+				<div class="daily-total" id="editDailyTotal">
+					1日の合計：0秒
+				</div>
 
-                    <div class="field">
-                        <label for="editMinutes">分</label>
-                        <input id="editMinutes" type="text"
-                            inputmode="numeric" value="0">
-                    </div>
+				<!-- 登録済みの個別記録 -->
+				<h3 class="sub-title">登録済みの学習記録</h3>
+				<div id="editSessionList"></div>
 
-                    <div class="field">
-                        <label for="editSeconds">秒</label>
-                        <input id="editSeconds" type="text"
-                            inputmode="numeric" value="0">
-                    </div>
-                </div>
+				<hr>
 
-                <div class="preview" id="editPreview">
-                    入力時間：0秒
-                </div>
+				<!-- 新規追加・編集フォーム -->
+				<h3 class="sub-title" id="sessionFormTitle">
+					新しい学習記録を追加
+				</h3>
 
-                <div class="actions">
-                    <button class="primary" id="editSave">
-                        保存
-                    </button>
-                    <button class="danger" id="editDelete">
-                        削除
-                    </button>
-                    <button class="secondary" id="editCancel">
-                        閉じる
-                    </button>
-                </div>
+				<div class="form-row">
+					<div class="field">
+						<label for="newSessionStartTime">開始時刻</label>
+						<input id="newSessionStartTime" type="time">
+					</div>
 
-                <div class="message" id="editMessage"></div>
-            </section>
+					<div class="field">
+						<label for="newSessionHours">時間</label>
+						<input id="newSessionHours"
+							type="text" inputmode="numeric" value="0">
+					</div>
+
+					<div class="field">
+						<label for="newSessionMinutes">分</label>
+						<input id="newSessionMinutes"
+							type="text" inputmode="numeric" value="0">
+					</div>
+
+					<div class="field">
+						<label for="newSessionSeconds">秒</label>
+						<input id="newSessionSeconds"
+							type="text" inputmode="numeric" value="0">
+					</div>
+				</div>
+
+				<div class="preview" id="sessionPreview">
+					入力時間：0秒
+				</div>
+
+				<div class="actions">
+					<button class="primary" id="sessionAddButton">
+						学習記録を追加
+					</button>
+
+					<button class="primary" id="sessionUpdateButton" hidden>
+						変更を保存
+					</button>
+
+					<button class="secondary" id="sessionFormCancel" hidden>
+						編集をキャンセル
+					</button>
+				</div>
+
+				<div class="message" id="editMessage"></div>
+
+				<div class="actions">
+					<button class="secondary" id="editCancel">
+						閉じる
+					</button>
+				</div>
+			</section>
 
 			<!-- 起算日の変更と学習データのリセット -->
 			<section class="card settings">
@@ -262,7 +279,7 @@
 			startDate: localDate(),
 			stockSeconds: 0,
 			completedDates: [],
-			sessions: {}
+			studySessions: []
 		};
 	}
 
@@ -280,15 +297,52 @@
 				if (
 					typeof saved.startDate !== "string" ||
 					!Array.isArray(saved.completedDates) ||
-					!saved.sessions ||
-					typeof saved.sessions !== "object" ||
 					!Number.isFinite(saved.stockSeconds) ||
 					saved.stockSeconds < 0
 				) {
 					return initialData();
 				}
 
-				return saved;
+				// 新しい形式のデータならそのまま読み込む
+				if (Array.isArray(saved.studySessions)) {
+					return {
+						...saved,
+						studySessions: saved.studySessions
+					};
+				}
+
+				// 古い形式のデータを新しい形式に変換する
+				if (saved.sessions && typeof saved.sessions === "object" && !Array.isArray(saved.sessions)) {
+					const migratedSessions = Object.entries(saved.sessions)
+						.filter(([date, seconds]) =>
+							Number.isSafeInteger(seconds) && seconds > 0
+						)
+						.map(([date, seconds]) => ({
+							id: crypto.randomUUID(),
+							date,
+							startTime: null,
+							durationSeconds: seconds,
+							source: "移行前の記録"
+                		}));
+
+					const migratedData = {
+						startDate: saved.startDate,
+						stockSeconds: saved.stockSeconds,
+						completedDates: saved.completedDates,
+						studySessions: migratedSessions
+					};
+
+					// 変換後のデータをブラウザに保存する
+					localStorage.setItem(
+						STORAGE_KEY,
+						JSON.stringify(migratedData)
+					);
+
+					return migratedData;
+				}
+
+				return initialData();
+
 			} catch (error) {
 				console.error("学習データの読み込みに失敗しました。", error);
 				return initialData();
@@ -302,6 +356,10 @@
 	// 現在編集している日付
 	let editingDate = null;
 
+	// 現在編集している個別記録のID
+	// 新規追加時は null、既存記録の編集時は対象のIDを保持する
+	let editingSessionId = null;
+
 	// 現在の学習データをブラウザに保存する
 	function saveData() {
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -310,6 +368,32 @@
 	// 達成済み日付の配列を Set に変換して検索しやすくする
 	function getCompletedSet() {
 		return new Set(data.completedDates);
+	}
+
+	// 指定日の学習記録を取得する
+	function getSessionsForDate(date) {
+		return data.studySessions.filter(
+			session => session.date === date
+		);
+	}
+
+	// 指定日の合計学習時間を秒数で取得する
+	function getDailyStudySeconds(date) {
+		return getSessionsForDate(date).reduce(
+			(total, session) => total + session.durationSeconds,
+			0
+		);
+	}
+
+	// 新しい学習記録を作成する
+	function createStudySession(date, startTime, durationSeconds, source) {
+		return {
+			id: crypto.randomUUID(),
+			date,
+			startTime,
+			durationSeconds,
+			source
+		};
 	}
 
 	// 起算日から今日までの未達成日を一覧にする
@@ -372,7 +456,7 @@
 		}
 
 		$("timePreview").textContent =
-    	`入力時間：${formatSeconds(totalSeconds)}（合計 ${totalSeconds} 秒）`;
+    	`入力時間：${formatSeconds(totalSeconds)}`;
 
 		$("recordButton").disabled = totalSeconds <= 0;
 	}
@@ -421,7 +505,7 @@
 			date <= today;
 			date = addDays(date, 1)
 		) {
-			const seconds = Number(data.sessions[date]) || 0;
+			const seconds = getDailyStudySeconds(date);
 
 			// その日に学習記録がなければ次の日へ進む
 			if (seconds <= 0) {
@@ -481,89 +565,29 @@
 	}
 
 	
-	// 秒数を受け取り、学習記録・達成判定・借金・ストックを更新する
-	function recordStudySeconds(seconds, source, targetDate) {
-		const today = targetDate || localDate();
+	// 現在時刻を HH:MM 形式で取得する
+	function getCurrentTime() {
+		const now = new Date();
 
-		if (!Number.isSafeInteger(seconds) || seconds <= 0) {
-			alert("1秒以上の学習時間が必要です。");
-			return null;
-		}
+		return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+	}
 
-		if (data.startDate > today) {
-			alert("起算日が未来の日付です。起算日を確認してください。");
-			return null;
-		}
+	// 達成済み日数の増減を数える
+	function countCompletedChanges(beforeCompleted, afterCompleted) {
+		let count = 0;
 
-		const completed = getCompletedSet();
-
-		// 今日より前の未達成日だけを取得する
-		const pastMissingDates = getMissingDates(addDays(today, -1));
-		const hasPastDebt = pastMissingDates.length > 0;
-		const todayIsIncomplete = !completed.has(today);
-
-		// 実際に勉強した時間だけを今日の記録に加算する
-		data.sessions[today] =
-			(Number(data.sessions[today]) || 0) + seconds;
-
-		let completedCount = 0;
-		let stockAdded = 0;
-
-		if (hasPastDebt) {
-			// 過去の借金がある場合、ストックと今回の学習時間を合算する
-			let availableSeconds = seconds + data.stockSeconds;
-			data.stockSeconds = 0;
-
-			for (const date of pastMissingDates) {
-				if (availableSeconds < DAILY_TARGET_SECONDS) {
-					break;
-				}
-
-				completed.add(date);
-				availableSeconds -= DAILY_TARGET_SECONDS;
-				completedCount++;
-			}
-
-			// 過去の借金を解消した後、今日のノルマを判定する
-			if (
-				todayIsIncomplete &&
-				availableSeconds >= DAILY_TARGET_SECONDS
-			) {
-				completed.add(today);
-				availableSeconds -= DAILY_TARGET_SECONDS;
-				completedCount++;
-			}
-
-			// 過去の借金が残っている場合だけ、余り時間をストックする
-			const remainingPastDebt = pastMissingDates.some(
-				date => !completed.has(date)
-			);
-			data.stockSeconds = remainingPastDebt ? availableSeconds: 0;
-			stockAdded = data.stockSeconds;
-
-		} else if (todayIsIncomplete) {
-			// 今日だけ未達成の場合、今回の学習時間とストックを合算する
-			const availableSeconds = seconds + data.stockSeconds;
-
-			if (
-				availableSeconds >= DAILY_TARGET_SECONDS
-			) {
-				completed.add(today);
-				completedCount++;
-				data.stockSeconds = 0;
-			} else{
-				// 今日のノルマに届かなければ、時間をストックする
-				data.stockSeconds = availableSeconds;
-				stockAdded = availableSeconds;
+		for (const date of afterCompleted) {
+			if (!beforeCompleted.has(date)) {
+				count++;
 			}
 		}
 
-		data.completedDates = [...completed].sort();
+		return count;
+	}
 
-		saveData();
-		render();
-
-		let result = `${source}の学習記録：${formatSeconds(seconds)}\n`;
+	// 学習記録の結果メッセージを作成する
+	function createStudyResultMessage(source, seconds, completedCount) {
+		let result = `${source}：${formatSeconds(seconds)}\n`;
 
 		result += completedCount > 0
 			? `${completedCount}日分のノルマを達成しました。\n`
@@ -572,6 +596,54 @@
 		result += `現在のストック：${formatSeconds(data.stockSeconds)}`;
 
 		return result;
+	}
+
+	// 学習時間を個別記録として追加し、達成状況を再計算する
+	function recordStudySeconds(
+		seconds,
+		source,
+		targetDate = localDate(),
+		startTime = getCurrentTime()
+	) {
+		if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+			alert("1秒以上の学習時間が必要です。");
+			return null;
+		}
+
+		if (targetDate < data.startDate || targetDate > localDate()) {
+			alert("記録できる日付ではありません。");
+			return null;
+		}
+
+		const beforeCompleted = new Set(data.completedDates);
+
+		// 個別記録を1件追加する
+		data.studySessions.push(
+			createStudySession(
+				targetDate,
+				startTime || null,
+				seconds,
+				source
+			)
+		);
+
+		// 個別記録の合計時間をもとに達成状況を再計算する
+		recalculateStudyStatus();
+
+		// ブラウザに保存して画面を更新する
+		saveData();
+		render();
+
+		const completedCount = countCompletedChanges(
+			beforeCompleted,
+			new Set(data.completedDates)
+		);
+
+		return createStudyResultMessage(
+			`${source}の学習記録`,
+			seconds,
+			completedCount
+		);
 	}
 
 
@@ -605,51 +677,12 @@
 		$("debtTimeValue").textContent = formatSeconds(remainingDebtSeconds);
 	}
 
-	// カレンダーの日付をクリックしたときに編集画面を表示する
-	function openEditSection(date) {
-		const today = localDate();
-
-		// 未来の日付と起算日前の日付は編集できない
-		if (date > today || date < data.startDate) {
-			return;
-		}
-
-		editingDate = date;
-
-		const seconds = Number(data.sessions[date]) || 0;
-
-		const hours = Math.floor(seconds / 3600);
-		const minutes = Math.floor((seconds % 3600) / 60);
-		const remainingSeconds = seconds % 60;
-
-		$("editTitle").textContent =
-			`${formatDate(date)} の学習時間`;
-
-		$("editHours").value = hours;
-		$("editMinutes").value = minutes;
-		$("editSeconds").value = remainingSeconds;
-
-		// 記録がない日には削除ボタンを表示しない
-		$("editDelete").disabled = seconds <= 0;
-
-		$("editMessage").style.display = "none";
-
-		$("editSection").hidden = false;
-
-		$("editSection").scrollIntoView({
-			behavior: "smooth",
-			block: "center"
-		});
-
-		updateEditPreview();
-	}
-
-	// 編集欄の入力値を秒数に変換する
-	function getEditInputSeconds() {
+	// 個別記録の入力欄から秒数を取得する
+	function getSessionFormSeconds() {
 		const values = [
-			$("editHours").value || "0",
-			$("editMinutes").value || "0",
-			$("editSeconds").value || "0"
+			$("newSessionHours").value || "0",
+			$("newSessionMinutes").value || "0",
+			$("newSessionSeconds").value || "0"
 		];
 
 		if (values.some(value => value.length > 8)) {
@@ -668,104 +701,303 @@
 			: null;
 	}
 
-	// 編集画面の入力時間を表示する
-	function updateEditPreview() {
-		const seconds = getEditInputSeconds();
+	// 個別記録の入力時間をプレビュー表示する
+	function updateSessionPreview() {
+		const seconds = getSessionFormSeconds();
 
 		if (seconds === null) {
-			$("editPreview").textContent = "入力値が大きすぎます。";
-			$("editSave").disabled = true;
+			$("sessionPreview").textContent = "入力値が大きすぎます。";
+			$("sessionAddButton").disabled = true;
+			$("sessionUpdateButton").disabled = true;
 			return;
 		}
 
-		$("editPreview").textContent =
+		$("sessionPreview").textContent =
 			`入力時間：${formatSeconds(seconds)}`;
 
-		$("editSave").disabled = false;
+		const disabled = seconds <= 0;
+
+		$("sessionAddButton").disabled = disabled;
+		$("sessionUpdateButton").disabled = disabled;
 	}
 
-	// 学習時間を保存する
-	function saveEditedStudy() {
+	// 新規追加フォームに戻す
+	function resetSessionForm() {
+		editingSessionId = null;
+
+		$("sessionFormTitle").textContent = "新しい学習記録を追加";
+		$("sessionAddButton").hidden = false;
+		$("sessionUpdateButton").hidden = true;
+		$("sessionFormCancel").hidden = true;
+
+		$("newSessionStartTime").value =
+			editingDate === localDate() ? getCurrentTime() : "";
+
+		$("newSessionHours").value = "0";
+		$("newSessionMinutes").value = "0";
+		$("newSessionSeconds").value = "0";
+
+		updateSessionPreview();
+	}
+
+	// 指定日の個別記録一覧を表示する
+	function renderSessionList() {
+		const list = $("editSessionList");
+		list.innerHTML = "";
+
+		const sessions = getSessionsForDate(editingDate);
+
+		$("editDailyTotal").textContent =
+			`1日の合計：${formatSeconds(getDailyStudySeconds(editingDate))}`;
+
+		if (sessions.length === 0) {
+			list.textContent = "登録されている学習記録はありません。";
+			return;
+		}
+
+		sessions.forEach(session => {
+			const item = document.createElement("div");
+			item.className = "session-item";
+
+			const info = document.createElement("div");
+			info.className = "session-item-info";
+
+			const time = document.createElement("div");
+			time.textContent = session.startTime || "時刻不明";
+
+			const duration = document.createElement("div");
+			duration.textContent = formatSeconds(session.durationSeconds);
+
+			const source = document.createElement("div");
+			source.textContent = `記録元：${session.source}`;
+
+			info.append(time, duration, source);
+
+			const actions = document.createElement("div");
+			actions.className = "session-item-actions";
+
+			const editButton = document.createElement("button");
+			editButton.className = "secondary";
+			editButton.textContent = "編集";
+			editButton.dataset.action = "edit";
+			editButton.dataset.sessionId = session.id;
+
+			const deleteButton = document.createElement("button");
+			deleteButton.className = "danger";
+			deleteButton.textContent = "削除";
+			deleteButton.dataset.action = "delete";
+			deleteButton.dataset.sessionId = session.id;
+
+			actions.append(editButton, deleteButton);
+			item.append(info, actions);
+			list.appendChild(item);
+		});
+	}
+
+	// カレンダーの日付をクリックしたときに編集画面を表示する
+	function openEditSection(date) {
+		const today = localDate();
+
+		if (date > today || date < data.startDate) {
+			return;
+		}
+
+		editingDate = date;
+
+		$("editTitle").textContent =
+			`${formatDate(date)} の学習記録`;
+
+		$("editMessage").style.display = "none";
+
+		resetSessionForm();
+		renderSessionList();
+
+		$("editSection").hidden = false;
+
+		$("editSection").scrollIntoView({
+			behavior: "smooth",
+			block: "center"
+		});
+	}
+
+	// 一覧から選択した個別記録を編集フォームに表示する
+	function startEditingSession(sessionId) {
+		const target = data.studySessions.find(
+			session =>
+				session.id === sessionId &&
+				session.date === editingDate
+		);
+
+		if (!target) {
+			alert("編集する記録が見つかりません。");
+			return;
+		}
+
+		editingSessionId = target.id;
+
+		$("sessionFormTitle").textContent = "学習記録を編集";
+
+		$("newSessionStartTime").value = target.startTime || "";
+
+		$("newSessionHours").value =
+			Math.floor(target.durationSeconds / 3600);
+
+		$("newSessionMinutes").value =
+			Math.floor((target.durationSeconds % 3600) / 60);
+
+		$("newSessionSeconds").value =
+			target.durationSeconds % 60;
+
+		$("sessionAddButton").hidden = true;
+		$("sessionUpdateButton").hidden = false;
+		$("sessionFormCancel").hidden = false;
+
+		updateSessionPreview();
+	}
+
+	// 新しい個別記録を追加する
+	function addStudySession() {
 		if (!editingDate) {
 			return;
 		}
 
-		const seconds = getEditInputSeconds();
+		const seconds = getSessionFormSeconds();
 
-		if (seconds === null) {
-			alert("正しい学習時間を入力してください。");
+		if (seconds === null || seconds <= 0) {
+			alert("1秒以上の学習時間を入力してください。");
 			return;
 		}
 
-		// 0秒の場合は記録を削除する
-		if (seconds === 0) {
-			delete data.sessions[editingDate];
-		} else {
-			// 指定日の学習時間を置き換える
-			data.sessions[editingDate] = seconds;
-		}
+		const beforeCompleted = new Set(data.completedDates);
 
-		// 達成状況とストックを再計算する
+		data.studySessions.push(
+			createStudySession(
+				editingDate,
+				$("newSessionStartTime").value || null,
+				seconds,
+				"手入力"
+			)
+		);
+
 		recalculateStudyStatus();
-
 		saveData();
 		render();
 
-		// 保存後の入力欄も最新の記録に合わせる
-		$("editHours").value = Math.floor(seconds / 3600);
-		$("editMinutes").value = Math.floor((seconds % 3600) / 60);
-		$("editSeconds").value = seconds % 60;
-
-		$("editDelete").disabled = seconds === 0;
+		const completedCount = countCompletedChanges(
+			beforeCompleted,
+			new Set(data.completedDates)
+		);
 
 		$("editMessage").textContent =
-			seconds === 0
-				? "学習記録を削除しました。"
-				: "学習時間を保存しました。";
+			createStudyResultMessage(
+				"学習記録を追加しました",
+				seconds,
+				completedCount
+			);
 
 		$("editMessage").style.display = "block";
 
-		updateEditPreview();
+		resetSessionForm();
+		renderSessionList();
 	}
 
-	// 学習時間を削除する
-	function deleteEditedStudy() {
-		if (!editingDate) {
+	// 選択した個別記録を編集して保存する
+	function updateStudySession() {
+		if (!editingSessionId || !editingDate) {
 			return;
 		}
 
-		if (!data.sessions[editingDate]) {
-			alert("削除できる学習記録がありません。");
+		const seconds = getSessionFormSeconds();
+
+		if (seconds === null || seconds <= 0) {
+			alert("1秒以上の学習時間を入力してください。");
+			return;
+		}
+
+		const target = data.studySessions.find(
+			session =>
+				session.id === editingSessionId &&
+				session.date === editingDate
+		);
+
+		if (!target) {
+			alert("編集する記録が見つかりません。");
+			return;
+		}
+
+		const beforeCompleted = new Set(data.completedDates);
+
+		target.startTime = $("newSessionStartTime").value || null;
+		target.durationSeconds = seconds;
+
+		recalculateStudyStatus();
+		saveData();
+		render();
+
+		const completedCount = countCompletedChanges(
+			beforeCompleted,
+			new Set(data.completedDates)
+		);
+
+		$("editMessage").textContent =
+			createStudyResultMessage(
+				"学習記録を編集しました",
+				seconds,
+				completedCount
+			);
+
+		$("editMessage").style.display = "block";
+
+		resetSessionForm();
+		renderSessionList();
+	}
+
+	// 選択した個別記録だけを削除する
+	function deleteStudySession(sessionId) {
+		const target = data.studySessions.find(
+			session =>
+				session.id === sessionId &&
+				session.date === editingDate
+		);
+
+		if (!target) {
+			alert("削除する記録が見つかりません。");
 			return;
 		}
 
 		if (!confirm(
-			`${formatDate(editingDate)}の学習記録を削除しますか？`
+			`${formatDate(editingDate)}の${formatSeconds(target.durationSeconds)}の記録を削除しますか？`
 		)) {
 			return;
 		}
 
-		// 指定日の学習記録を削除する
-		delete data.sessions[editingDate];
+		const beforeCompleted = new Set(data.completedDates);
+		const deletedSeconds = target.durationSeconds;
 
-		// 達成状況・ストック・未達成日数を再計算する
+		data.studySessions = data.studySessions.filter(
+			session => session.id !== sessionId
+		);
+
 		recalculateStudyStatus();
-
-		// ブラウザに保存して画面を更新する
 		saveData();
 		render();
 
-		// 削除後の入力欄を初期化する
-		$("editHours").value = 0;
-		$("editMinutes").value = 0;
-		$("editSeconds").value = 0;
+		const completedCount = countCompletedChanges(
+			beforeCompleted,
+			new Set(data.completedDates)
+		);
 
-		$("editDelete").disabled = true;
+		$("editMessage").textContent =
+			`学習記録を削除しました：${formatSeconds(deletedSeconds)}\n` +
+			(completedCount > 0
+				? `${completedCount}日分のノルマを達成しました。\n`
+				: "今回の達成：なし\n") +
+			`現在のストック：${formatSeconds(data.stockSeconds)}`;
 
-		$("editMessage").textContent = "学習記録を削除しました。";
 		$("editMessage").style.display = "block";
 
-		updateEditPreview();
+		resetSessionForm();
+		renderSessionList();
 	}
 
 	// 達成状況と学習時間を月間カレンダーに描画する
@@ -792,7 +1024,7 @@
 			const future = key > today;
 			const before = key < data.startDate;
 			const isDone = done.has(key);
-			const seconds = Number(data.sessions[key]) || 0;
+			const seconds = getDailyStudySeconds(key);
 			const cell = document.createElement("div");
 			cell.className = "day";
 
@@ -853,32 +1085,61 @@
 		renderCalendar();
 	}
 	
-	// 編集画面の入力欄を監視する
-	["editHours", "editMinutes", "editSeconds"].forEach(id => {
+	// 個別記録の入力欄を監視する
+	[
+		"newSessionHours",
+		"newSessionMinutes",
+		"newSessionSeconds"
+	].forEach(id => {
 		$(id).addEventListener("focus", event => {
 			event.target.select();
 		});
 
 		$(id).addEventListener("input", () => {
 			sanitizeNumericInput($(id));
-			updateEditPreview();
+			updateSessionPreview();
 		});
 	});
 
-	// 編集内容を保存する
-	$("editSave").addEventListener("click", () => {
-		saveEditedStudy();
+	// 個別記録を追加する
+	$("sessionAddButton").addEventListener("click", () => {
+		addStudySession();
 	});
 
-	// 学習記録を削除する
-	$("editDelete").addEventListener("click", () => {
-		deleteEditedStudy();
+	// 個別記録の変更を保存する
+	$("sessionUpdateButton").addEventListener("click", () => {
+		updateStudySession();
+	});
+
+	// 個別記録の編集をキャンセルする
+	$("sessionFormCancel").addEventListener("click", () => {
+		resetSessionForm();
+	});
+
+	// 個別記録一覧の編集・削除ボタンを処理する
+	$("editSessionList").addEventListener("click", event => {
+		const button = event.target.closest("button[data-action]");
+
+		if (!button) {
+			return;
+		}
+
+		const sessionId = button.dataset.sessionId;
+
+		if (button.dataset.action === "edit") {
+			startEditingSession(sessionId);
+		}
+
+		if (button.dataset.action === "delete") {
+			deleteStudySession(sessionId);
+		}
 	});
 
 	// 編集画面を閉じる
 	$("editCancel").addEventListener("click", () => {
 		$("editSection").hidden = true;
 		editingDate = null;
+		editingSessionId = null;
 	});
 
 	// 学習を記録ボタンを押したときに記録処理を実行する
@@ -952,14 +1213,18 @@
 	let watchPausedMilliseconds = 0;
 	let watchTimer = null;
 
-	// ストップウォッチの状態を保存する
+	// ストップウォッチを最初に開始した日時
+	let watchSessionStartedAt = null;
+
+	// ストップウォッチの状態と開始日時を保存する
 	function saveWatchState() {
 		try {
 			localStorage.setItem(
 				WATCH_STORAGE_KEY,
 				JSON.stringify({
 					state: watchState,
-					elapsedMilliseconds: getElapsedMilliseconds()
+					elapsedMilliseconds: getElapsedMilliseconds(),
+					sessionStartedAt: watchSessionStartedAt
 				})
 			);
 		} catch (error) {
@@ -988,10 +1253,24 @@
 			}
 
 			watchPausedMilliseconds = saved.elapsedMilliseconds;
+
+			// 開始日時を復元する
+			if (
+				Number.isFinite(saved.sessionStartedAt) &&
+				saved.sessionStartedAt > 0
+			) {
+				watchSessionStartedAt = saved.sessionStartedAt;
+			} else {
+				// 古い保存データに開始日時がない場合は経過時間から推定する
+				watchSessionStartedAt =
+					Date.now() - saved.elapsedMilliseconds;
+			}
+
 			watchStartedAt = null;
 			watchState = "paused";
 
 			return true;
+
 		} catch (error) {
 			console.error("ストップウォッチの復元に失敗しました。", error);
 			return false;
@@ -1044,13 +1323,17 @@
 	$("watchStart").addEventListener("click", () => {
 		watchState = "running";
 		watchStartedAt = Date.now();
+
+		// 最初に開始した日時を保存する
+		watchSessionStartedAt = watchStartedAt;
+
 		watchPausedMilliseconds = 0;
 
 		saveWatchState();
 
 		watchTimer = setInterval(() => {
-		renderWatch();
-		saveWatchState();
+			renderWatch();
+			saveWatchState();
 		}, 1000);
 
 		updateWatchButtons();
@@ -1096,29 +1379,6 @@
 	// 計測を破棄する
 	$("watchReset").addEventListener("click", () => {
 		if (!confirm("計測時間を破棄しますか？")) {
-		return;
-		}
-
-		clearInterval(watchTimer);
-		watchTimer = null;
-		watchState = "idle";
-		watchStartedAt = null;
-		watchPausedMilliseconds = 0;
-
-		clearSavedWatchState();
-
-		updateWatchButtons();
-		renderWatch();
-
-		$("watchMessage").style.display = "none";
-	});
-
-	// 計測を終了し、今日の学習時間に加算する
-	$("watchFinish").addEventListener("click", () => {
-		const seconds = Math.floor(getElapsedMilliseconds() / 1000);
-
-		if (seconds < 1) {
-			alert("記録できる時間がありません。");
 			return;
 		}
 
@@ -1128,12 +1388,59 @@
 		watchStartedAt = null;
 		watchPausedMilliseconds = 0;
 
+		// 最初に開始した日時も削除する
+		watchSessionStartedAt = null;
+
 		clearSavedWatchState();
 
 		updateWatchButtons();
 		renderWatch();
 
-		const result = recordStudySeconds(seconds, "ストップウォッチ");
+		$("watchMessage").style.display = "none";
+	});
+
+	// 計測を終了し、個別の学習記録として保存する
+	$("watchFinish").addEventListener("click", () => {
+		const seconds = Math.floor(getElapsedMilliseconds() / 1000);
+
+		if (seconds < 1) {
+			alert("記録できる時間がありません。");
+			return;
+		}
+
+		if (watchSessionStartedAt === null) {
+			alert("計測開始日時を取得できません。");
+			return;
+		}
+
+		// 最初に開始した日時から記録日・開始時刻を取得する
+		const startedDate = new Date(watchSessionStartedAt);
+
+		const targetDate = localDate(startedDate);
+
+		const startTime =
+			`${String(startedDate.getHours()).padStart(2, "0")}:` +
+			`${String(startedDate.getMinutes()).padStart(2, "0")}`;
+
+		clearInterval(watchTimer);
+		watchTimer = null;
+		watchState = "idle";
+		watchStartedAt = null;
+		watchPausedMilliseconds = 0;
+		watchSessionStartedAt = null;
+
+		clearSavedWatchState();
+
+		updateWatchButtons();
+		renderWatch();
+
+		// 個別記録として保存する
+		const result = recordStudySeconds(
+			seconds,
+			"ストップウォッチ",
+			targetDate,
+			startTime
+		);
 
 		if (result) {
 			$("watchMessage").textContent = result;

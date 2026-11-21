@@ -345,3 +345,63 @@ button:disabled {
 #editTitle {
     margin-bottom: 16px;
 }
+/* 個別学習記録の一覧 */
+#editSessionList {
+    display: grid;
+    gap: 10px;
+    margin: 12px 0 20px;
+}
+
+/* 個別記録1件分 */
+.session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #f8f9ff;
+}
+
+/* 記録の情報 */
+.session-item-info {
+    min-width: 0;
+}
+
+/* 編集・削除ボタン */
+.session-item-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.session-item-actions button {
+    padding: 8px 12px;
+}
+
+/* 1日の合計時間 */
+.daily-total {
+    padding: 14px;
+    margin-bottom: 18px;
+    background: #f4f5ff;
+    border-radius: 9px;
+    font-weight: 700;
+}
+
+/* 小見出し */
+.sub-title {
+    font-size: 15px;
+    margin: 18px 0 10px;
+}
+
+@media(max-width: 650px) {
+    .session-item {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .session-item-actions {
+        width: 100%;
+    }
+}
