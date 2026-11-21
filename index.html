@@ -116,7 +116,7 @@
 					<span><i class="dot dot-done"></i>達成</span>
 					<span><i class="dot dot-undone"></i>未達成</span>
 					<span><i class="dot dot-future"></i>対象外</span>
-					<span>枠線：今日</span>
+					<span>青枠：今日　オレンジ枠：編集中</span>
 				</div>
 			</section>
 
@@ -364,6 +364,12 @@
 	// 現在編集している日付
 	let editingDate = null;
 
+	// 最後に日付の変更を確認した日
+	let lastCheckedDate = localDate();
+
+	// 日付変更を確認するタイマー
+	let midnightRefreshTimer = null;
+
 	// 現在編集している個別記録のID
 	// 新規追加時は null、既存記録の編集時は対象のIDを保持する
 	let editingSessionId = null;
@@ -497,7 +503,7 @@
 			return;
 		}
 
-		const result = recordStudySeconds(inputSeconds, "手入力");
+		const result = recordStudySeconds(inputSeconds, "保存された学習時間");
 
 		if (result) {
 		$("message").textContent = result;
@@ -831,6 +837,9 @@
 
 		editingDate = date;
 
+		// 選択中の日付の枠線を更新する
+		renderCalendar();
+
 		// 日付を開くたびに個別記録を折りたたむ
 		isSessionsExpanded = false;
 
@@ -925,6 +934,7 @@
 				completedCount
 			);
 
+		$("editMessage").classList.remove("message-danger");	
 		$("editMessage").style.display = "block";
 
 		resetSessionForm();
@@ -976,6 +986,7 @@
 				completedCount
 			);
 
+		$("editMessage").classList.remove("message-danger");	
 		$("editMessage").style.display = "block";
 
 		resetSessionForm();
@@ -1024,6 +1035,7 @@
 				: "今回の達成：なし\n") +
 			`現在のストック：${formatSeconds(data.stockSeconds)}`;
 
+		$("editMessage").classList.add("message-danger");	
 		$("editMessage").style.display = "block";
 
 		resetSessionForm();
@@ -1066,6 +1078,9 @@
 			}
 			if (key === today) {
 				cell.classList.add("today");
+			}
+			if (key === editingDate) {
+				cell.classList.add("selected");
 			}
 
 			const num = document.createElement("div");
@@ -1113,6 +1128,49 @@
 		$("startDate").value = data.startDate;
 		renderStats();
 		renderCalendar();
+	}
+
+	// 日付が変わったか確認し、学習状況を更新する
+	function refreshDateIfNeeded() {
+		const today = localDate();
+
+		// 前回確認した日付と同じなら何もしない
+		if (today === lastCheckedDate) {
+			return;
+		}
+
+		// 確認日を更新する
+		lastCheckedDate = today;
+
+		// 新しい日付を含めて達成状況とストックを再計算する
+		recalculateStudyStatus();
+
+		// 再計算したデータを保存して画面を更新する
+		saveData();
+		render();
+	}
+
+	// 次の日付変更直後に更新処理を実行する
+	function scheduleMidnightRefresh() {
+		// 前回のタイマーが残っていれば解除する
+		if (midnightRefreshTimer !== null) {
+			clearTimeout(midnightRefreshTimer);
+		}
+
+		// 次の日の午前0時0分0秒を設定する
+		const nextMidnight = new Date();
+		nextMidnight.setHours(24, 0, 0, 0);
+
+		// 午前0時までの待ち時間を計算する
+		const delay = nextMidnight.getTime() - Date.now();
+
+		midnightRefreshTimer = setTimeout(() => {
+			// 日付が変わっていれば学習状況を更新する
+			refreshDateIfNeeded();
+
+			// 次の日付変更に備えてタイマーを再設定する
+			scheduleMidnightRefresh();
+		}, delay);
 	}
 	
 	// 個別記録の入力欄を監視する
@@ -1177,6 +1235,9 @@
 		$("editSection").hidden = true;
 		editingDate = null;
 		editingSessionId = null;
+
+		// 編集終了後、選択中の日付の枠線を解除する
+    	renderCalendar();
 	});
 
 	// 学習を記録ボタンを押したときに記録処理を実行する
@@ -1488,7 +1549,10 @@
 	// 別タブなどから戻ったときに表示を更新する
 	document.addEventListener("visibilitychange", () => {
 		if (!document.hidden) {
-		renderWatch();
+			// 日付が変わっていれば学習状況を更新する
+			refreshDateIfNeeded();
+			// ストップウォッチの表示も更新する
+			renderWatch();
 		}
 	});
 
@@ -1498,6 +1562,8 @@
 	renderWatch();
 	updatePreview();
 	render();
+	// 日付変更時の自動更新を開始する
+	scheduleMidnightRefresh();
 		</script>
 	</body>
 </html>

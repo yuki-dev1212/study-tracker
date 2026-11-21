@@ -142,6 +142,13 @@ button:disabled {
 	display:none;
 	white-space:pre-line;
 }
+
+/* 削除完了メッセージ */
+.message.message-danger {
+    background:#fff0f0;
+    color:#b73e4a;
+}
+
 .calendar-card {
 	margin-top:18px;
 }
@@ -200,6 +207,18 @@ button:disabled {
 .day.today {
 	outline:2px solid var(--primary);
 	outline-offset:-2px;
+}
+/* 現在編集中の日付をオレンジの内枠で強調 */
+.day.selected {
+    position: relative;
+}
+.day.selected::after {
+    content: "";
+    position: absolute;
+    inset: 4px 4px 4px;
+    border: 2px solid #f5a044;
+    border-radius: 6px;
+    pointer-events: none;
 }
 .day-number {
 	font-size:13px;
