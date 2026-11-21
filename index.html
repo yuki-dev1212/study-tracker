@@ -132,8 +132,16 @@
 				</div>
 
 				<!-- 登録済みの個別記録 -->
-				<h3 class="sub-title">登録済みの学習記録</h3>
-				<div id="editSessionList"></div>
+				<button
+					class="session-toggle"
+					id="sessionListToggle"
+					type="button"
+					aria-expanded="false"
+					aria-controls="editSessionList"
+				>
+					登録済みの学習記録（0件）　表示する ▼
+				</button>
+				<div id="editSessionList" hidden></div>
 
 				<hr>
 
@@ -359,6 +367,10 @@
 	// 現在編集している個別記録のID
 	// 新規追加時は null、既存記録の編集時は対象のIDを保持する
 	let editingSessionId = null;
+
+	// 個別記録一覧の展開状態
+	// false：折りたたみ、true：展開
+	let isSessionsExpanded = false;
 
 	// 現在の学習データをブラウザに保存する
 	function saveData() {
@@ -743,18 +755,33 @@
 	// 指定日の個別記録一覧を表示する
 	function renderSessionList() {
 		const list = $("editSessionList");
+		const toggleButton = $("sessionListToggle");
 		list.innerHTML = "";
 
 		const sessions = getSessionsForDate(editingDate);
 
+		// 1日の合計時間を更新する
 		$("editDailyTotal").textContent =
 			`1日の合計：${formatSeconds(getDailyStudySeconds(editingDate))}`;
 
+			// 記録件数と展開状態をボタンに反映する
+			toggleButton.textContent =
+				`登録済みの学習記録（${sessions.length}件）　` +
+				(isSessionsExpanded ? "閉じる ▲" : "表示する ▼");
+			toggleButton.setAttribute(
+				"aria-expanded",
+				String(isSessionsExpanded)
+			);
+			// 展開状態に応じて一覧の表示・非表示を切り替える
+			list.hidden = !isSessionsExpanded;
+
+		// 記録がない場合	
 		if (sessions.length === 0) {
 			list.textContent = "登録されている学習記録はありません。";
 			return;
 		}
 
+		// 個別記録を一覧に追加する
 		sessions.forEach(session => {
 			const item = document.createElement("div");
 			item.className = "session-item";
@@ -803,6 +830,9 @@
 		}
 
 		editingDate = date;
+
+		// 日付を開くたびに個別記録を折りたたむ
+		isSessionsExpanded = false;
 
 		$("editTitle").textContent =
 			`${formatDate(date)} の学習記録`;
@@ -1114,6 +1144,13 @@
 	// 個別記録の編集をキャンセルする
 	$("sessionFormCancel").addEventListener("click", () => {
 		resetSessionForm();
+	});
+
+	// 個別記録一覧の表示・非表示を切り替える
+	$("sessionListToggle").addEventListener("click", () => {
+		isSessionsExpanded = !isSessionsExpanded;
+
+		renderSessionList();
 	});
 
 	// 個別記録一覧の編集・削除ボタンを処理する

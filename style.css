@@ -405,3 +405,36 @@ button:disabled {
         width: 100%;
     }
 }
+
+/* 個別記録一覧の折りたたみボタン */
+.session-toggle {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
+    padding: 14px;
+    margin: 12px 0;
+    background: #f4f5ff;
+    color: #4658cf;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* 折りたたみボタンにマウスを乗せたとき */
+.session-toggle:hover {
+    background: #eceedf;
+}
+
+/* キーボード操作時のフォーカス表示 */
+.session-toggle:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* 個別記録一覧が非表示の場合 */
+#editSessionList[hidden] {
+    display: none;
+}
