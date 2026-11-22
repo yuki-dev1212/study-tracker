@@ -1314,6 +1314,9 @@
 	// ストップウォッチを最初に開始した日時
 	let watchSessionStartedAt = null;
 
+	// 一時停止などで確定した計測区間を保存する
+	let watchCompletedIntervals = [];
+
 	// ストップウォッチの状態と開始日時を保存する
 	function saveWatchState() {
 		try {
@@ -1322,7 +1325,8 @@
 				JSON.stringify({
 					state: watchState,
 					elapsedMilliseconds: getElapsedMilliseconds(),
-					sessionStartedAt: watchSessionStartedAt
+					sessionStartedAt: watchSessionStartedAt,
+					intervals: getWatchIntervalsForSave()
 				})
 			);
 		} catch (error) {
@@ -1364,6 +1368,25 @@
 					Date.now() - saved.elapsedMilliseconds;
 			}
 
+			// 保存されていた計測区間を復元する
+			if (Array.isArray(saved.intervals)) {
+				watchCompletedIntervals = saved.intervals.filter(interval =>
+					interval &&
+					Number.isFinite(interval.start) &&
+					Number.isFinite(interval.end) &&
+					interval.end > interval.start
+				);
+			} else {
+				// 変更前の保存データは、従来どおり開始日にまとめて扱う
+				watchCompletedIntervals = saved.elapsedMilliseconds > 0
+					? [{
+						start: watchSessionStartedAt,
+						end: watchSessionStartedAt + saved.elapsedMilliseconds,
+						date: localDate(new Date(watchSessionStartedAt))
+					}]
+					: [];
+			}
+
 			watchStartedAt = null;
 			watchState = "paused";
 
@@ -1392,6 +1415,91 @@
 		: 0;
 
 		return watchPausedMilliseconds + runningMilliseconds;
+	}
+
+	// 保存用の計測区間を取得する
+	function getWatchIntervalsForSave() {
+		const intervals = watchCompletedIntervals.map(interval => ({
+			...interval
+		}));
+
+		// 現在計測中の区間も保存対象に含める
+		if (watchState === "running" && watchStartedAt !== null) {
+			intervals.push({
+				start: watchStartedAt,
+				end: Date.now()
+			});
+		}
+
+		return intervals;
+	}
+
+	// 計測区間を日付ごとの時間に分割する
+	function splitWatchIntervalsByDate(intervals) {
+		const totals = {};
+
+		// 指定した日付に計測時間を加算する
+		function addTime(date, start, end) {
+			const milliseconds = end - start;
+
+			if (milliseconds <= 0) {
+				return;
+			}
+
+			if (!totals[date]) {
+				totals[date] = {
+					milliseconds: 0,
+					firstStartAt: start
+				};
+			}
+
+			totals[date].milliseconds += milliseconds;
+
+			if (start < totals[date].firstStartAt) {
+				totals[date].firstStartAt = start;
+			}
+		}
+
+		// 保存されている計測区間を1件ずつ処理する
+		for (const interval of intervals) {
+			// 変更前の保存データは開始日にまとめる
+			if (interval.date) {
+				addTime(
+					interval.date,
+					interval.start,
+					interval.end
+				);
+				continue;
+			}
+
+			let cursor = interval.start;
+
+			// 計測終了まで日付ごとに分割する
+			while (cursor < interval.end) {
+				const currentDate = localDate(new Date(cursor));
+
+				// 次の日の午前0時を取得する
+				const nextMidnight = new Date(cursor);
+				nextMidnight.setHours(24, 0, 0, 0);
+
+				// 現在の日付の終了時刻を求める
+				const segmentEnd = Math.min(
+					interval.end,
+					nextMidnight.getTime()
+				);
+
+				if (segmentEnd <= cursor) {
+					break;
+				}
+
+				addTime(currentDate, cursor, segmentEnd);
+
+				// 次の日の区間へ進む
+				cursor = segmentEnd;
+			}
+		}
+
+		return totals;
 	}
 
 	// ストップウォッチの表示を更新する
@@ -1427,6 +1535,9 @@
 
 		watchPausedMilliseconds = 0;
 
+		// 新しい計測を開始するため、過去の区間をリセットする
+		watchCompletedIntervals = [];
+
 		saveWatchState();
 
 		watchTimer = setInterval(() => {
@@ -1443,10 +1554,22 @@
 		if (watchState !== "running") {
 			return;
 		}
+		// 一時停止した時刻を取得する
+		const pausedAt = Date.now();
 
-		watchPausedMilliseconds += Date.now() - watchStartedAt;
+		// 今回の計測区間を保存する
+		watchCompletedIntervals.push({
+			start: watchStartedAt,
+			end: pausedAt
+		});
+
+		watchPausedMilliseconds += pausedAt - watchStartedAt;
 		watchStartedAt = null;
 		watchState = "paused";
+
+		// 一時停止中は表示更新タイマーも停止する
+		clearInterval(watchTimer);
+		watchTimer = null;
 
 		saveWatchState();
 
@@ -1488,6 +1611,8 @@
 
 		// 最初に開始した日時も削除する
 		watchSessionStartedAt = null;
+		// 保存前の計測区間も削除する
+		watchCompletedIntervals = [];
 
 		clearSavedWatchState();
 
@@ -1497,53 +1622,117 @@
 		$("watchMessage").style.display = "none";
 	});
 
-	// 計測を終了し、個別の学習記録として保存する
+	// 計測を終了し、日付ごとに分割して学習記録として保存する
 	$("watchFinish").addEventListener("click", () => {
-		const seconds = Math.floor(getElapsedMilliseconds() / 1000);
-
-		if (seconds < 1) {
-			alert("記録できる時間がありません。");
-			return;
-		}
+		const finishAt = Date.now();
 
 		if (watchSessionStartedAt === null) {
 			alert("計測開始日時を取得できません。");
 			return;
 		}
 
-		// 最初に開始した日時から記録日・開始時刻を取得する
-		const startedDate = new Date(watchSessionStartedAt);
+		// 現在計測中なら、終了時刻までの区間を追加する
+		const intervalsToSave = watchCompletedIntervals.map(interval => ({
+			...interval
+		}));
 
-		const targetDate = localDate(startedDate);
+		if (watchState === "running" && watchStartedAt !== null) {
+			intervalsToSave.push({
+			start: watchStartedAt,
+			end: finishAt
+			});
+		}
 
-		const startTime =
-			`${String(startedDate.getHours()).padStart(2, "0")}:` +
-			`${String(startedDate.getMinutes()).padStart(2, "0")}`;
+		// 計測区間を日付ごとに分割する
+		const dailyTotals = splitWatchIntervalsByDate(intervalsToSave);
 
+		// 日付ごとの学習記録を作成する
+		const records = Object.entries(dailyTotals)
+        .map(([date, item]) => {
+            const seconds = Math.floor(item.milliseconds / 1000);
+
+            if (seconds < 1) {
+                return null;
+            }
+
+            const startedAt = new Date(item.firstStartAt);
+
+			const startTime =
+				`${String(startedAt.getHours()).padStart(2, "0")}:` +
+				`${String(startedAt.getMinutes()).padStart(2, "0")}`;
+
+			return {
+                date,
+                seconds,
+                startTime
+            };
+        })
+        .filter(record => record !== null);
+
+		// 保存する学習時間の合計を取得する
+		const totalSeconds = records.reduce(
+			(total, record) => total + record.seconds, 0
+		);
+
+		if (totalSeconds < 1) {
+			alert("記録できる時間がありません。");
+			return;
+		}
+
+		// 起算日より前の日付が含まれていないか確認する
+		if (records.some(record => record.date < data.startDate)) {
+			alert("起算日より前の日付が含まれています。起算日を確認してください。");
+			return;
+		}
+		const beforeCompleted = new Set(data.completedDates);
+
+		// ストップウォッチを停止する
 		clearInterval(watchTimer);
 		watchTimer = null;
 		watchState = "idle";
 		watchStartedAt = null;
 		watchPausedMilliseconds = 0;
 		watchSessionStartedAt = null;
+		watchCompletedIntervals = [];
 
 		clearSavedWatchState();
 
 		updateWatchButtons();
 		renderWatch();
 
-		// 個別記録として保存する
-		const result = recordStudySeconds(
-			seconds,
+		// 日付ごとに個別学習記録を追加する
+		for (const record of records) {
+        data.studySessions.push(
+            createStudySession(
+                record.date,
+                record.startTime,
+                record.seconds,
 			"ストップウォッチ",
-			targetDate,
-			startTime
+			)
 		);
+	}	
 
-		if (result) {
+	// 達成状況とストックを再計算する
+    recalculateStudyStatus();
+
+    saveData();
+    render();
+
+    const completedCount = countCompletedChanges(
+        beforeCompleted,
+        new Set(data.completedDates)
+    );
+
+		// 保存結果を表示する
+    	const result = createStudyResultMessage(
+			"ストップウォッチの学習記録",
+			totalSeconds,
+			completedCount
+    	);
+
 			$("watchMessage").textContent = result;
 			$("watchMessage").style.display = "block";
-		}
+		
 	});
 
 	// 別タブなどから戻ったときに表示を更新する
