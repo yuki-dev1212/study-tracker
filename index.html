@@ -1686,7 +1686,45 @@
 		}
 		const beforeCompleted = new Set(data.completedDates);
 
-		// ストップウォッチを停止する
+		// 日付ごとの学習記録を作成する
+		const newSessions = records.map(record =>
+			createStudySession(
+				record.date,
+				record.startTime,
+				record.seconds,
+				"ストップウォッチ",
+			)
+		);
+
+		// 作成した学習記録を追加する
+		data.studySessions.push(...newSessions);
+
+		// 達成状況とストックを再計算する
+		recalculateStudyStatus();
+
+		// 学習データを保存する
+		try {
+			saveData();
+		} catch (error) {
+			// 保存に失敗した場合は、今回追加した記録を取り除く
+			const newSessionIds = new Set(
+				newSessions.map(session => session.id)
+			);
+
+			data.studySessions = data.studySessions.filter(
+				session => !newSessionIds.has(session.id)
+			);
+
+			// 達成状況とストックを元の記録から再計算する
+			recalculateStudyStatus();
+
+			console.error("学習記録の保存に失敗しました。", error);
+			alert("学習記録を保存できませんでした。ストップウォッチの計測状態は維持されています。");
+
+			return;
+		}
+
+		// 保存に成功した場合のみストップウォッチを停止する
 		clearInterval(watchTimer);
 		watchTimer = null;
 		watchState = "idle";
@@ -1699,24 +1737,7 @@
 
 		updateWatchButtons();
 		renderWatch();
-
-		// 日付ごとに個別学習記録を追加する
-		for (const record of records) {
-        data.studySessions.push(
-            createStudySession(
-                record.date,
-                record.startTime,
-                record.seconds,
-			"ストップウォッチ",
-			)
-		);
-	}	
-
-	// 達成状況とストックを再計算する
-    recalculateStudyStatus();
-
-    saveData();
-    render();
+    	render();
 
     const completedCount = countCompletedChanges(
         beforeCompleted,
